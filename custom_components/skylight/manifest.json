@@ -1,0 +1,12 @@
+{
+  "domain": "skylight",
+  "name": "Skylight",
+  "version": "3.0.0",
+  "documentation": "https://github.com/devinslick/skylight_hass",
+  "issue_tracker": "https://github.com/devinslick/skylight_hass/issues",
+  "requirements": ["python-dateutil>=2.8"],
+  "codeowners": ["@devinslick"],
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "config_flow": true
+}

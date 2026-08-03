@@ -1,0 +1,30 @@
+upload_media:
+  name: Upload media
+  description: >-
+    Upload a photo or short video to a Skylight frame. The file must live under
+    a path Home Assistant is allowed to read (config directory or an
+    allowlist_external_dirs entry).
+  fields:
+    file_path:
+      name: File path
+      description: >-
+        Absolute path to the media file. Must be readable by Home Assistant.
+        Examples: /config/www/photo.jpg, /media/camera/snapshot.jpg
+      required: true
+      example: /config/www/snapshot.jpg
+      selector:
+        text: {}
+    caption:
+      name: Caption
+      description: Optional caption shown alongside the photo on the frame.
+      example: Family dinner tonight
+      selector:
+        text: {}
+    frame_id:
+      name: Frame ID
+      description: >-
+        Target frame ID. Only required when multiple Skylight frames are
+        configured. When omitted, the single configured frame is used.
+      example: "5377413"
+      selector:
+        text: {}

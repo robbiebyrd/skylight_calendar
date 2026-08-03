@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in to Skylight",
+        "description": "1. [Open Skylight sign-in]({auth_url}) in a new tab.\n2. Sign in with your Skylight email and password.\n3. When the page finishes loading, look at your browser's address bar \u2014 it will contain `?code=\u2026`.\n4. Copy the value of `code` (or the whole URL \u2014 either works) and paste it below.",
+        "data": {
+          "code": "Authorization code"
+        }
+      },
+      "pick_frame": {
+        "title": "Choose your Skylight frame",
+        "description": "Your Skylight account has more than one frame. Pick which one to set up now \u2014 you can add the others later.",
+        "data": {
+          "frame_id": "Frame"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Couldn't reach the Skylight API. Try again in a moment.",
+      "invalid_auth": "That code was rejected \u2014 codes expire in about 30 seconds. Click the link again to get a fresh one.",
+      "invalid_code": "That doesn't look like a Skylight authorization code. Paste the value of `code=` from the address bar (or the whole URL).",
+      "no_frames": "No Skylight frames were found on this account."
+    },
+    "abort": {
+      "already_configured": "This Skylight frame is already configured.",
+      "all_frames_configured": "Every frame on this account is already configured in Home Assistant.",
+      "reauth_successful": "Skylight authentication refreshed."
+    }
+  },
+  "services": {
+    "upload_media": {
+      "name": "Upload media",
+      "description": "Upload a photo or short video to a Skylight frame.",
+      "fields": {
+        "file_path": {
+          "name": "File path",
+          "description": "Absolute path to the media file. Must be readable by Home Assistant."
+        },
+        "caption": {
+          "name": "Caption",
+          "description": "Optional caption shown alongside the photo on the frame."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Only required with multiple frames configured."
+        }
+      }
+    }
+  }
+}
