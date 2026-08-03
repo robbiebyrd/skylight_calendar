@@ -45,9 +45,9 @@ Full [Skylight Calendar Frame](https://www.ourskylight.com/) integration for Hom
 ## Installation (HACS)
 
 1. HACS → Integrations → three-dot menu → **Custom repositories**
-2. Repository: `https://github.com/devinslick/skylight_hass` — Category: **Integration**
+2. Repository: `https://github.com/MegaTheLEGEND/skylight_calendar` — Category: **Integration**
 
-   [![Open your Home Assistant instance and open a repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=devinslick&repository=skylight_hass&category=integration)
+   [![Open your Home Assistant instance and open a repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=megathelegend&repository=skylight_calendar&category=integration)
 3. Search **Skylight** → Download → pick the latest release.
 4. Restart Home Assistant.
 5. Settings → Devices & Services → **Add Integration** → **Skylight**.
@@ -356,7 +356,7 @@ logger:
 
 ## Credits
 
-Originally forked from [MegaTheLEGEND/skylight_calendar](https://github.com/MegaTheLEGEND/skylight_calendar). OAuth2 rewrite + platform expansion by [@devinslick](https://github.com/devinslick).
+[MegaTheLEGEND/skylight_calendar](https://github.com/MegaTheLEGEND/skylight_calendar). OAuth2 rewrite + platform expansion by [@devinslick](https://github.com/devinslick). (Thank you so much!)
 
 ## License
 
