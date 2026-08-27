@@ -230,7 +230,24 @@ class SkylightAPI:
                 raise SkylightAuthError("Skylight auth failed after refresh")
             if resp.status >= 400:
                 text = await resp.text()
-                raise SkylightAPIError(f"{method} {path} → {resp.status}: {text[:200]}")
+                # Echo the payload back on validation failures. Skylight's 4xx
+                # bodies name the offending field but never what we sent, and
+                # that's the only thing separating a wrong key name from a wrong
+                # envelope — without it every fix is a guess.
+                _LOGGER.debug(
+                    "Skylight %s %s rejected (%s): sent=%s got=%s",
+                    method,
+                    path,
+                    resp.status,
+                    _json.dumps(json_body) if json_body is not None else "<no body>",
+                    text[:500],
+                )
+                detail = ""
+                if resp.status == 422 and json_body is not None:
+                    detail = f" — sent {_json.dumps(json_body)}"
+                raise SkylightAPIError(
+                    f"{method} {path} → {resp.status}: {text[:200]}{detail}"
+                )
             text = await resp.text()
             if not text:
                 return {}
