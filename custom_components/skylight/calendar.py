@@ -348,4 +348,4 @@ class SkylightSourceCalendar(_SkylightCalendarBase):
         return self._source_id
 
     def _source_key(self) -> str | None:
-        return self._source_calendar().get("email")
+        return self._source_calendar().get("source_id")

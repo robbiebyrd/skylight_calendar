@@ -32,8 +32,8 @@ upload_media:
 create_chore:
   name: Create chore
   description: >-
-    Add a chore to the frame's chore chart, optionally assigned to a family
-    member and worth reward points.
+    Add a chore to the frame's chore chart, assigned to one or more family
+    members. Skylight creates a separate chore per assignee.
   fields:
     summary:
       name: Summary
@@ -42,6 +42,22 @@ create_chore:
       example: Take out the bins
       selector:
         text: {}
+    assignees:
+      name: Assignees
+      description: >-
+        Family member names, one or several — matched case-insensitively against
+        the frame's profiles. Either this or Family member IDs is required.
+      example: '["Robbie", "Josh"]'
+      selector:
+        object: {}
+    category_ids:
+      name: Family member IDs
+      description: >-
+        Category IDs to assign, as an alternative to Assignees. Read them off
+        the assignee_id of an existing chore in sensor.<frame>_chores_today.
+      example: '["23469502"]'
+      selector:
+        object: {}
     start:
       name: Date
       description: Day the chore is due. Defaults to today.
@@ -54,43 +70,39 @@ create_chore:
       example: "17:30:00"
       selector:
         text: {}
-    category_id:
-      name: Family member ID
+    description:
+      name: Description
+      description: Longer detail shown with the chore on the frame.
+      selector:
+        text:
+          multiline: true
+    routine:
+      name: Routine
+      description: Mark the chore as part of a routine.
+      default: false
+      selector:
+        boolean: {}
+    up_for_grabs:
+      name: Up for grabs
       description: >-
-        Category ID of the family member to assign. Read the available IDs off
-        the frame's category attributes, or the assignee_id of an existing
-        chore. Skylight rejects a chore with no category.
-      required: true
-      example: "9115870"
-      selector:
-        text: {}
-    reward_points:
-      name: Reward points
-      description: Points credited when the chore is completed.
-      selector:
-        number:
-          min: 0
-          max: 1000
-          mode: box
-    emoji:
-      name: Emoji
-      description: Emoji shown next to the chore on the frame.
-      example: 🗑️
-      selector:
-        text: {}
-    recurring:
-      name: Recurring
-      description: Whether the chore repeats.
+        Let any family member claim the chore rather than fixing it to the
+        assignee.
       default: false
       selector:
         boolean: {}
     recurrence_set:
       name: Recurrence rule
       description: >-
-        Skylight recurrence definition, only used when Recurring is on. Copy the
-        value from an existing recurring chore rather than writing one by hand.
+        Skylight recurrence definition. Copy the value from an existing
+        recurring chore rather than writing one by hand.
       selector:
         text: {}
+    recurring_until:
+      name: Repeat until
+      description: Last day a recurring chore should be generated for.
+      example: "2026-12-31"
+      selector:
+        date: {}
     frame_id: *frame_id
 
 create_task:

@@ -149,9 +149,15 @@ def _jsonapi_doc(
 ) -> dict:
     """Wrap attributes in a JSON:API request document.
 
-    Chores, lists, rewards and task_box items all take this envelope. Note that
-    calendar events, recipes and meal sittings do *not* — they take plain-JSON
-    bodies, as do the device PATCHes.
+    UNVERIFIED. Every remaining caller of this helper (create/update list,
+    create task_box item, create/update reward, update chore) came from the
+    skylight-mcp reference, which has no fixtures for any of them. Chore
+    *creation* was ported from that same reference and turned out to be plain
+    flat JSON against a different route entirely — so treat this envelope as
+    suspect until a request capture confirms it per-endpoint.
+
+    Confirmed-flat so far: chore create, calendar events, recipes, meal
+    sittings, list items, device PATCH.
     """
     data: dict[str, Any] = {"type": resource_type, "attributes": dict(attributes)}
     if relationships:
@@ -305,11 +311,18 @@ class SkylightAPI:
     # ── Endpoints ───────────────────────────────────────────────────────
 
     async def get_frames(self) -> list[dict]:
+        """Frames on the account, as ``{id, name}`` for the config flow.
+
+        ``attributes.name`` is a generated slug ("byrd-malone-7772"), so prefer
+        ``household_name`` ("Byrd & Malone") — that's what the app displays and
+        what a user will recognise in the frame picker.
+        """
         data = await self._request("GET", "/api/frames")
         out = []
         for item in data.get("data", []):
             fid = item.get("id")
-            name = item.get("attributes", {}).get("name")
+            attrs = item.get("attributes", {}) or {}
+            name = attrs.get("household_name") or attrs.get("name")
             if fid:
                 out.append({"id": str(fid), "name": name or f"Skylight Frame {fid}"})
         return out
@@ -490,7 +503,11 @@ class SkylightAPI:
         filter_linked_to_profile: bool = False,
     ) -> dict:
         """Chores in a date range. Set ``filter_linked_to_profile`` to drop chores
-        that aren't assigned to a real family member profile."""
+        that aren't assigned to a real family member profile.
+
+        ``include_up_for_grabs`` mirrors the web app, which always asks for
+        unclaimed chores; without it they're missing from the feed entirely.
+        """
         return await self._request(
             "GET",
             f"/api/frames/{frame_id}/chores",
@@ -498,52 +515,55 @@ class SkylightAPI:
                 "after": after,
                 "before": before,
                 "include_late": "true",
+                "include_up_for_grabs": "true",
                 "filter": "linked_to_profile" if filter_linked_to_profile else None,
             },
         )
 
-    async def create_chore(
+    async def create_chores(
         self,
         frame_id: str,
         summary: str,
         start: str,
+        category_ids: list[str],
         *,
+        description: str | None = None,
         start_time: str | None = None,
-        status: str = "pending",
-        recurring: bool = False,
+        routine: bool = False,
+        up_for_grabs: bool = False,
         recurrence_set: str | None = None,
-        category_id: str | None = None,
-        reward_points: int | None = None,
-        emoji_icon: str | None = None,
+        recurring_until: str | None = None,
+        renewal_interval: int | None = None,
+        renewal_unit: str | None = None,
     ) -> dict:
-        """Create a chore (JSON:API POST).
+        """Create a chore for each of ``category_ids``.
 
-        ``start`` is a ``YYYY-MM-DD`` date, ``start_time`` an optional
-        ``HH:MM:SS``. ``category_id`` assigns the chore to a family member (see
-        :meth:`get_categories`) and is required — Skylight answers a chore with
-        no category with ``422 Category is required``.
+        Skylight has no singular chore-create route: the only one is
+        ``chores/create_multiple``, which fans out one chore per assigned family
+        member. ``POST /chores`` exists but answers ``422 Category is required``
+        no matter how the category is passed.
 
-        Note the assignment travels as a plain ``category_id`` *attribute*, not
-        as a JSON:API ``relationships`` block: Skylight silently ignores the
-        relationship envelope on this endpoint and then fails the model
-        validation.
+        Wire shape captured from the Skylight web app. It is a flat body — *not*
+        the JSON:API envelope the rest of the chore routes use — and every key is
+        sent, nulls included. Don't add unobserved keys here: ``status``,
+        ``reward_points`` and ``emoji_icon`` are deliberately absent because the
+        app never sends them on create, and this payload is known-good as-is.
         """
-        doc = _jsonapi_doc(
-            "chore",
-            {
-                "summary": summary,
-                "start": start,
-                "start_time": start_time,
-                "status": status,
-                "recurring": recurring,
-                "recurrence_set": recurrence_set,
-                "reward_points": reward_points,
-                "emoji_icon": emoji_icon,
-                **_compact(category_id=category_id),
-            },
-        )
+        body = {
+            "start": start,
+            "up_for_grabs": up_for_grabs,
+            "routine": routine,
+            "start_time": start_time,
+            "recurrence_set": recurrence_set,
+            "renewal_interval": renewal_interval,
+            "renewal_unit": renewal_unit,
+            "recurring_until": recurring_until,
+            "summary": summary,
+            "description": description,
+            "category_ids": [str(c) for c in category_ids],
+        }
         return await self._request(
-            "POST", f"/api/frames/{frame_id}/chores", json_body=doc
+            "POST", f"/api/frames/{frame_id}/chores/create_multiple", json_body=body
         )
 
     async def update_chore(
@@ -557,9 +577,13 @@ class SkylightAPI:
         """Partial update of a chore (JSON:API PUT).
 
         Only the keys present in ``attributes`` change. Pass ``category_id=None``
-        to unassign the chore; omit it to leave the assignment untouched. As on
-        :meth:`create_chore`, the assignment is a plain attribute rather than a
-        JSON:API relationship.
+        to unassign the chore; omit it to leave the assignment untouched.
+
+        UNVERIFIED envelope. This is the pre-existing shape that
+        :meth:`update_chore_status` has always used, kept as-is rather than
+        churned on a guess — but :meth:`create_chores` turned out to need a flat
+        body on a different route, so this one likely does too. Needs a capture
+        of the web app toggling a chore complete to settle it.
         """
         if not isinstance(category_id, _Unset):
             attributes = {**attributes, "category_id": category_id}
@@ -621,14 +645,25 @@ class SkylightAPI:
         return await self._request("GET", f"/api/frames/{frame_id}/reward_points")
 
     async def get_rewards(
-        self, frame_id: str, redeemed_at_min: str | None = None
+        self,
+        frame_id: str,
+        redeemed_at_min: str | None = None,
+        redeemed_at_max: str | None = None,
     ) -> dict:
-        """Redeemable rewards. ``redeemed_at_min`` also includes rewards redeemed
-        on or after that timestamp."""
+        """Redeemable rewards, one record per family member per reward.
+
+        The window bounds also pull in already-redeemed rewards; the web app
+        passes a rolling 30 days of both. Each reward carries a *to-one*
+        ``category`` relationship — a reward belongs to exactly one member, and
+        Skylight duplicates it across members rather than sharing one record.
+        """
         return await self._request(
             "GET",
             f"/api/frames/{frame_id}/rewards",
-            params={"redeemed_at_min": redeemed_at_min},
+            params={
+                "redeemed_at_min": redeemed_at_min,
+                "redeemed_at_max": redeemed_at_max,
+            },
         )
 
     async def create_reward(
@@ -647,6 +682,14 @@ class SkylightAPI:
         ``category_ids`` restricts the reward to specific family members; omit it
         to offer it to the whole household. ``respawn_on_redemption`` keeps the
         reward available after it's claimed.
+
+        KNOWN-WRONG, pending a request capture. A GET shows each reward with a
+        *to-one* ``category`` relationship, so this ``categories`` to-many block
+        is wrong on both the key and the cardinality. By analogy with
+        :meth:`create_chores` the real route probably takes a flat body with
+        ``category_ids`` and fans out one reward per member — which is exactly
+        the duplication a GET shows — but that's inference, not observation, and
+        guessing it twice already cost a round trip on chores.
         """
         doc = _jsonapi_doc(
             "reward",

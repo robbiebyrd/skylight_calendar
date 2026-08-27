@@ -315,7 +315,7 @@ Every service takes an optional `frame_id`, which is only required when you have
 | Service | What it does |
 |---|---|
 | `skylight.upload_media` | Push a photo or short video to the frame (see above). |
-| `skylight.create_chore` | Add a chore to the chore chart — assigned to a family member (required), optionally timed, recurring, and worth reward points. |
+| `skylight.create_chore` | Add a chore to the chore chart, assigned to one or more family members (required). Skylight creates one chore per assignee. |
 | `skylight.create_task` | Add an unscheduled item to the Task Box for the frame to assign to a day later. |
 | `skylight.create_list` | Create a new shopping or to-do list. |
 | `skylight.delete_list` | Permanently delete a list and its items. |
@@ -328,16 +328,17 @@ Every service takes an optional `frame_id`, which is only required when you have
 **Finding IDs.** The `category_id` for a family member, `meal_category_id` for a meal slot, and `recipe_id` all come off the sensor attributes documented above — for example `sensor.<frame>_chores_today` exposes `assignee_id` per chore, and `sensor.<frame>_meals_today` exposes the recipe and slot for each planned meal. A list's `list_id` is the trailing segment of the matching todo entity's unique ID.
 
 ```yaml
-# Assign Saturday's bin duty to a family member, worth 5 stars
+# Assign Saturday's bin duty — one chore each for two family members
 service: skylight.create_chore
 data:
   summary: Take out the bins
   start: "2026-09-05"
   start_time: "17:30:00"
-  category_id: "9115870"
-  reward_points: 5
-  emoji: 🗑️
+  assignees: ["Robbie", "Josh"]   # or category_ids: ["23469502"]
+  description: Green bin this week
 ```
+
+Names are matched case-insensitively against the frame's profiles, and only against real people — a frame's category list also contains calendar buckets like `US Holidays` or `Robbie's Calendar`, and those are rejected rather than silently assigned. An unknown name lists the valid ones back at you.
 
 ```yaml
 # Plan Tuesday dinner and send the ingredients to the grocery list
@@ -351,7 +352,7 @@ data:
     recipe_id: "1234567"
 ```
 
-**Creating calendar events** uses the standard HA `calendar.create_event` service against the aggregate `calendar.<frame>_calendar` entity — Skylight puts events with no explicit calendar target on the frame's own calendar. Editing and deleting work against any source calendar Skylight reports as writable; read-only subscriptions (holiday feeds, shared Google calendars) don't advertise those features at all.
+**Creating calendar events** uses the standard HA `calendar.create_event` service against the aggregate `calendar.<frame>_calendar` entity. Skylight puts events with no explicit calendar target on whichever source calendar is flagged `default_for_new_events`. Editing and deleting work against any source calendar Skylight reports as writable; read-only subscriptions (holiday feeds, `webcal` imports like a council rubbish schedule) don't advertise those features at all.
 
 ```yaml
 service: calendar.create_event

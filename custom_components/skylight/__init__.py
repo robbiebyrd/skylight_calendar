@@ -162,19 +162,35 @@ UPLOAD_MEDIA_SCHEMA = vol.Schema(
     }
 )
 
-CREATE_CHORE_SCHEMA = vol.Schema(
-    {
-        vol.Required("summary"): _SUMMARY,
-        vol.Optional("start"): cv.date,
-        vol.Optional("start_time"): cv.string,
-        # Skylight 422s a chore with no category, so don't let the call through.
-        vol.Required("category_id"): cv.string,
-        vol.Optional("reward_points"): _POINTS,
-        vol.Optional("emoji"): cv.string,
-        vol.Optional("recurring", default=False): cv.boolean,
-        vol.Optional("recurrence_set"): cv.string,
-        **_FRAME_ID_FIELD,
-    }
+def _has_assignee(data: dict) -> dict:
+    """Skylight 422s a chore with no category, so don't let the call through."""
+    if not data.get("assignees") and not data.get("category_ids"):
+        raise vol.Invalid(
+            "A chore needs an assignee: pass assignees (family member names) "
+            "or category_ids (raw IDs)."
+        )
+    return data
+
+
+CREATE_CHORE_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Required("summary"): _SUMMARY,
+            # Either form works, and both accept one value or several — the
+            # route creates one chore per assignee.
+            vol.Optional("assignees"): vol.All(cv.ensure_list, [cv.string]),
+            vol.Optional("category_ids"): vol.All(cv.ensure_list, [cv.string]),
+            vol.Optional("start"): cv.date,
+            vol.Optional("start_time"): cv.string,
+            vol.Optional("description"): cv.string,
+            vol.Optional("routine", default=False): cv.boolean,
+            vol.Optional("up_for_grabs", default=False): cv.boolean,
+            vol.Optional("recurrence_set"): cv.string,
+            vol.Optional("recurring_until"): cv.date,
+            **_FRAME_ID_FIELD,
+        }
+    ),
+    _has_assignee,
 )
 
 CREATE_TASK_SCHEMA = vol.Schema(
@@ -275,18 +291,61 @@ def _resolve_entry(hass: HomeAssistant, target_frame: str | None) -> dict:
 ServiceAction = Callable[[SkylightAPI, str, Mapping[str, Any]], Awaitable[None]]
 
 
+async def _resolve_assignees(
+    api: SkylightAPI, frame_id: str, names: list[str]
+) -> list[str]:
+    """Map family member names onto category IDs.
+
+    Only categories with ``linked_to_profile`` are candidates. A frame's
+    category list also holds calendar buckets ("US Holidays", "Garbage Pickup")
+    and near-miss names — "Robbie" and "Robbie's Calendar" both exist on a real
+    frame — and assigning a chore to one of those is silently wrong rather than
+    an error, so they're excluded outright. Exact matches beat substring ones
+    for the same reason.
+    """
+    people: list[tuple[str, str]] = [
+        (str(c.get("id")), (c.get("attributes") or {}).get("label") or "")
+        for c in (await api.get_categories(frame_id)).get("data", []) or []
+        if (c.get("attributes") or {}).get("linked_to_profile")
+    ]
+
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for name in names:
+        wanted = name.strip().lower()
+        exact = next((cid for cid, label in people if label.lower() == wanted), None)
+        partial = next((cid for cid, label in people if wanted in label.lower()), None)
+        if match := (exact or partial):
+            resolved.append(match)
+        else:
+            unknown.append(name)
+
+    if unknown:
+        known = ", ".join(sorted(label for _, label in people if label)) or "none"
+        raise HomeAssistantError(
+            f"Unknown Skylight family member(s): {', '.join(unknown)}. "
+            f"Known members on this frame: {known}."
+        )
+    return resolved
+
+
 async def _create_chore(api: SkylightAPI, frame_id: str, data: Mapping[str, Any]) -> None:
     start: date | None = data.get("start")
-    await api.create_chore(
+    until: date | None = data.get("recurring_until")
+    category_ids = list(data.get("category_ids") or [])
+    if names := data.get("assignees"):
+        category_ids += await _resolve_assignees(api, frame_id, names)
+    await api.create_chores(
         frame_id,
         summary=data["summary"],
         start=(start or dt_util.now().date()).isoformat(),
+        category_ids=category_ids,
+        description=data.get("description"),
         start_time=data.get("start_time"),
-        recurring=data["recurring"],
+        routine=data["routine"],
+        up_for_grabs=data["up_for_grabs"],
         recurrence_set=data.get("recurrence_set"),
-        category_id=data.get("category_id"),
-        reward_points=data.get("reward_points"),
-        emoji_icon=data.get("emoji"),
+        recurring_until=until.isoformat() if until else None,
     )
 
 

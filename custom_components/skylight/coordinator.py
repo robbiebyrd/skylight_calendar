@@ -53,14 +53,31 @@ class SkylightCalendarCoordinator(DataUpdateCoordinator):
         source_calendars: list[dict] = []
         try:
             sc_resp = await self.api.get_source_calendars(self.frame_id)
+            # `included` carries the calendar_account records holding the real
+            # account email. `source_id` is NOT an email for caldav/webcal feeds
+            # — it's the full collection URL — so the two are tracked separately.
+            accounts = {
+                str(inc.get("id")): (inc.get("attributes", {}) or {}).get("email")
+                for inc in sc_resp.get("included", []) or []
+                if inc.get("type") == "calendar_account"
+            }
             for entry in sc_resp.get("data", []):
                 a = entry.get("attributes", {})
+                account = (
+                    ((entry.get("relationships", {}) or {}).get("calendar_account") or {})
+                    .get("data")
+                    or {}
+                )
                 source_calendars.append(
                     {
                         "id": str(entry.get("id")),
-                        "name": a.get("label") or a.get("name") or a.get("source_id") or a.get("email") or f"Calendar {entry.get('id')}",
-                        "email": a.get("source_id") or a.get("email"),
+                        "name": a.get("label") or a.get("name") or a.get("source_id") or f"Calendar {entry.get('id')}",
+                        # Matching key for events: calendar_event.calendar_id
+                        # equals the source calendar's source_id.
+                        "source_id": a.get("source_id"),
+                        "account_email": accounts.get(str(account.get("id"))),
                         "editable": a.get("editable"),
+                        "default_for_new_events": a.get("default_for_new_events"),
                         "role": a.get("role"),
                         "kind": a.get("kind"),
                     }

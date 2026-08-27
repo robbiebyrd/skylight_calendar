@@ -198,6 +198,7 @@ class SkylightMemberChoreTodo(
         | TodoListEntityFeature.UPDATE_TODO_ITEM
         | TodoListEntityFeature.DELETE_TODO_ITEM
         | TodoListEntityFeature.SET_DUE_DATE_ON_ITEM
+        | TodoListEntityFeature.SET_DESCRIPTION_ON_ITEM
     )
 
     def __init__(
@@ -261,17 +262,25 @@ class SkylightMemberChoreTodo(
                 except ValueError:
                     due = None
             result.append(
-                TodoItem(summary=summary, uid=uid, status=status, due=due)
+                TodoItem(
+                    summary=summary,
+                    uid=uid,
+                    status=status,
+                    due=due,
+                    description=attrs.get("description") or None,
+                )
             )
         return result
 
     async def async_create_todo_item(self, item: TodoItem) -> None:
-        await self._api.create_chore(
+        # Skylight's create route takes no status, so a new chore always starts
+        # pending — completing it is a second call the user makes from the list.
+        await self._api.create_chores(
             self._frame_id,
             summary=item.summary or "Chore",
             start=_chore_start(item.due),
-            status=_wire_status(item.status),
-            category_id=self._category_id,
+            category_ids=[self._category_id],
+            description=item.description,
         )
         await self.coordinator.async_request_refresh()
 
@@ -285,6 +294,8 @@ class SkylightMemberChoreTodo(
             attributes["status"] = _wire_status(item.status)
         if item.due is not None:
             attributes["start"] = _chore_start(item.due)
+        if item.description is not None:
+            attributes["description"] = item.description
         if not attributes:
             return
         await self._api.update_chore(self._frame_id, item.uid, attributes)
