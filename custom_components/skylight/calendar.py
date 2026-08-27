@@ -71,7 +71,9 @@ async def async_setup_entry(
     entry.async_on_unload(coord.async_add_listener(_handle_update))
 
 
-def _parse_events(raw_events: dict, source_id: str | None = None) -> list[CalendarEvent]:
+def _parse_events(
+    raw_events: dict, source_id: str | None = None, source_key: str | None = None
+) -> list[CalendarEvent]:
     """Parse Skylight event feed → CalendarEvent list, optionally filtered by source calendar."""
     events: list[CalendarEvent] = []
     for ev in raw_events.get("data", []):
@@ -81,10 +83,16 @@ def _parse_events(raw_events: dict, source_id: str | None = None) -> list[Calend
             sc_rel = rels.get("source_calendar", {}) or {}
             sc_data = sc_rel.get("data") or {}
             ev_source = str(sc_data.get("id") or attrs.get("source_calendar_id") or "")
-            if ev_source and ev_source != str(source_id):
-                continue
-            if not ev_source:
-                # No source info — only include in aggregate view.
+            if ev_source:
+                if ev_source != str(source_id):
+                    continue
+            elif source_key:
+                # The frames API returns no source_calendar relationship on an event.
+                # The only link back is calendar_event.calendar_id matching the
+                # source calendar's source_id.
+                if str(attrs.get("calendar_id") or "") != str(source_key):
+                    continue
+            else:
                 continue
         starts = attrs.get("starts_at")
         ends = attrs.get("ends_at")
@@ -130,9 +138,12 @@ class _SkylightCalendarBase(
     def _source_filter(self) -> str | None:
         return None
 
+    def _source_key(self) -> str | None:
+        return None
+
     def _all_events(self) -> list[CalendarEvent]:
         raw = (self.coordinator.data or {}).get("events", {}) or {}
-        return _parse_events(raw, self._source_filter())
+        return _parse_events(raw, self._source_filter(), self._source_key())
 
     @property
     def event(self) -> CalendarEvent | None:
@@ -188,3 +199,9 @@ class SkylightSourceCalendar(_SkylightCalendarBase):
 
     def _source_filter(self) -> str | None:
         return self._source_id
+
+    def _source_key(self) -> str | None:
+        for sc in (self.coordinator.data or {}).get("source_calendars", []) or []:
+            if str(sc.get("id")) == self._source_id:
+                return sc.get("email")
+        return None
