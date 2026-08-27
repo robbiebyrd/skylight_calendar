@@ -14,6 +14,7 @@ from .const import (
     API_VERSION,
     BASE_URL,
     CHORE_STATUS_COMPLETE,
+    CHORE_STATUS_PENDING,
     CLIENT_ID,
     OAUTH_URL,
     USER_AGENT,
@@ -646,12 +647,16 @@ class SkylightAPI:
     async def uncomplete_chore(self, frame_id: str, chore_id: str) -> dict:
         """Un-tick a chore.
 
-        INFERRED: the REST inverse of :meth:`complete_chore`'s PUT on the same
-        sub-collection. Un-ticking in the web app hasn't been captured, so this
-        is the shape to check first if clearing a chore fails.
+        Confirmed against the web app: the *same* PUT on the same sub-resource as
+        :meth:`complete_chore`, just ``{"status": "pending"}`` with no
+        ``completed_on``. Not a DELETE — the collection name reads like one, but
+        the endpoint sets a state rather than removing a record. The response
+        clears ``completed_on``, ``completed_at`` and ``completed_category``.
         """
         return await self._request(
-            "DELETE", f"/api/frames/{frame_id}/chores/{chore_id}/completions"
+            "PUT",
+            f"/api/frames/{frame_id}/chores/{chore_id}/completions",
+            json_body={"status": CHORE_STATUS_PENDING},
         )
 
     async def delete_chore(self, frame_id: str, chore_id: str) -> None:

@@ -25,12 +25,18 @@ _LOGGER = logging.getLogger(__name__)
 class SkylightCalendarCoordinator(DataUpdateCoordinator):
     """Fetch calendar events + source_calendars for splitting into per-calendar entities."""
 
-    def __init__(self, hass: HomeAssistant, api: SkylightAPI, frame_id: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: SkylightAPI,
+        frame_id: str,
+        update_interval: int = CALENDAR_SCAN_INTERVAL,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN} calendar {frame_id}",
-            update_interval=timedelta(seconds=CALENDAR_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=update_interval),
         )
         self.api = api
         self.frame_id = frame_id
@@ -91,12 +97,18 @@ class SkylightCalendarCoordinator(DataUpdateCoordinator):
 class SkylightListsCoordinator(DataUpdateCoordinator):
     """Fetch every list + its items."""
 
-    def __init__(self, hass: HomeAssistant, api: SkylightAPI, frame_id: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: SkylightAPI,
+        frame_id: str,
+        update_interval: int = LISTS_SCAN_INTERVAL,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN} lists {frame_id}",
-            update_interval=timedelta(seconds=LISTS_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=update_interval),
         )
         self.api = api
         self.frame_id = frame_id
@@ -145,12 +157,18 @@ class SkylightListsCoordinator(DataUpdateCoordinator):
 class SkylightSensorCoordinator(DataUpdateCoordinator):
     """Aggregate chores + meals + rewards + categories for sensors and per-member todos."""
 
-    def __init__(self, hass: HomeAssistant, api: SkylightAPI, frame_id: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: SkylightAPI,
+        frame_id: str,
+        update_interval: int = SENSOR_SCAN_INTERVAL,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN} sensors {frame_id}",
-            update_interval=timedelta(seconds=SENSOR_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=update_interval),
         )
         self.api = api
         self.frame_id = frame_id
@@ -247,12 +265,18 @@ class SkylightFrameCoordinator(DataUpdateCoordinator):
     Data shape: ``{"device_id": "5669988", "attributes": {...}}``
     """
 
-    def __init__(self, hass: HomeAssistant, api: SkylightAPI, frame_id: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: SkylightAPI,
+        frame_id: str,
+        update_interval: int = FRAME_SCAN_INTERVAL,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN} frame {frame_id}",
-            update_interval=timedelta(seconds=FRAME_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=update_interval),
         )
         self.api = api
         self.frame_id = frame_id
@@ -287,12 +311,18 @@ class SkylightFrameCoordinator(DataUpdateCoordinator):
 class SkylightPhotosCoordinator(DataUpdateCoordinator):
     """Fetch latest frame photos (messages feed)."""
 
-    def __init__(self, hass: HomeAssistant, api: SkylightAPI, frame_id: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: SkylightAPI,
+        frame_id: str,
+        update_interval: int = PHOTOS_SCAN_INTERVAL,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN} photos {frame_id}",
-            update_interval=timedelta(seconds=PHOTOS_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=update_interval),
         )
         self.api = api
         self.frame_id = frame_id

@@ -38,10 +38,13 @@ from .const import (
     CONF_FRAME_NAME,
     CONF_REFRESH_TOKEN,
     DOMAIN,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
     OAUTH_AUTHORIZE_URL,
     OAUTH_CLIENT_ID,
     OAUTH_REDIRECT_URI,
     OAUTH_SCOPE,
+    SCAN_INTERVAL_OPTIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -243,5 +246,39 @@ class SkylightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
-        return None
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> SkylightOptionsFlow:
+        return SkylightOptionsFlow(config_entry)
+
+
+class SkylightOptionsFlow(config_entries.OptionsFlow):
+    """Tune how often each Skylight resource is polled."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        # Stored privately rather than as self.config_entry: assigning that
+        # attribute is deprecated in current HA, but accepting the entry here
+        # still works across versions.
+        self._entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self._entry.options
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        key, default=options.get(key, default)
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
+                    )
+                    for key, default in SCAN_INTERVAL_OPTIONS.items()
+                }
+            ),
+        )

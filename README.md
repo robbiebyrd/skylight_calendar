@@ -61,6 +61,20 @@ Entities are only created for settings your frame actually reports — Skylight'
 
 Copy `custom_components/skylight/` into `config/custom_components/skylight/` and restart HA.
 
+## Polling intervals
+
+Settings → Devices & Services → Skylight → **Configure** sets how often each kind of data is fetched, in seconds (30–7200):
+
+| Option | Default | Covers |
+|---|---|---|
+| Calendar | 300 | Calendar events and connected calendars |
+| Lists | 120 | Shopping and to-do lists |
+| Chores, meals and rewards | 300 | Chores, meal plans, star totals, task box |
+| Frame settings | 600 | Brightness, sleep schedule, other device settings |
+| Photos | 900 | Latest frame photo |
+
+Saving reloads the integration. Frame settings and connected-calendar lists are fetched conditionally (`If-None-Match`), so polling those more often costs little; chores, lists, rewards and photos always fetch in full, because Skylight's cache validators don't reliably move when those records change.
+
 ---
 
 ## Reading item details in Lovelace

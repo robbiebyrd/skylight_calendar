@@ -21,10 +21,15 @@ from homeassistant.util import dt as dt_util
 from .api import SkylightAPI, SkylightAPIError
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_CALENDAR_INTERVAL,
     CONF_DEVICE_FINGERPRINT,
     CONF_FRAME_ID,
+    CONF_FRAME_INTERVAL,
     CONF_FRAME_NAME,
+    CONF_LISTS_INTERVAL,
+    CONF_PHOTOS_INTERVAL,
     CONF_REFRESH_TOKEN,
+    CONF_SENSOR_INTERVAL,
     DOMAIN,
     PLATFORM_BINARY_SENSOR,
     PLATFORM_CALENDAR,
@@ -34,6 +39,7 @@ from .const import (
     PLATFORM_SWITCH,
     PLATFORM_TIME,
     PLATFORM_TODO,
+    SCAN_INTERVAL_OPTIONS,
 )
 from .coordinator import (
     SkylightCalendarCoordinator,
@@ -92,11 +98,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         token_update_cb=_persist_tokens,
     )
 
-    calendar_coord = SkylightCalendarCoordinator(hass, api, frame_id)
-    lists_coord = SkylightListsCoordinator(hass, api, frame_id)
-    sensor_coord = SkylightSensorCoordinator(hass, api, frame_id)
-    frame_coord = SkylightFrameCoordinator(hass, api, frame_id)
-    photos_coord = SkylightPhotosCoordinator(hass, api, frame_id)
+    def _interval(key: str) -> int:
+        return int(entry.options.get(key, SCAN_INTERVAL_OPTIONS[key]))
+
+    calendar_coord = SkylightCalendarCoordinator(
+        hass, api, frame_id, _interval(CONF_CALENDAR_INTERVAL)
+    )
+    lists_coord = SkylightListsCoordinator(
+        hass, api, frame_id, _interval(CONF_LISTS_INTERVAL)
+    )
+    sensor_coord = SkylightSensorCoordinator(
+        hass, api, frame_id, _interval(CONF_SENSOR_INTERVAL)
+    )
+    frame_coord = SkylightFrameCoordinator(
+        hass, api, frame_id, _interval(CONF_FRAME_INTERVAL)
+    )
+    photos_coord = SkylightPhotosCoordinator(
+        hass, api, frame_id, _interval(CONF_PHOTOS_INTERVAL)
+    )
 
     await calendar_coord.async_config_entry_first_refresh()
     await lists_coord.async_config_entry_first_refresh()
@@ -130,7 +149,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_register_services(hass)
+    # Poll intervals are baked into the coordinators at construction, so a change
+    # only takes effect on reload.
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
+
+
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload after the options flow saves."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 SERVICE_UPLOAD_MEDIA = "upload_media"

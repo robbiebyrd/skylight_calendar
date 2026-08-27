@@ -28,6 +28,28 @@
       "reauth_successful": "Skylight authentication refreshed."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Skylight polling intervals",
+        "description": "How often Home Assistant asks Skylight for each kind of data, in seconds. Lower values update sooner and make more API requests. Saving reloads the integration.",
+        "data": {
+          "calendar_scan_interval": "Calendar",
+          "lists_scan_interval": "Lists",
+          "sensor_scan_interval": "Chores, meals and rewards",
+          "frame_scan_interval": "Frame settings",
+          "photos_scan_interval": "Photos"
+        },
+        "data_description": {
+          "calendar_scan_interval": "How often to refresh calendar events and connected calendars.",
+          "lists_scan_interval": "How often to refresh shopping and to-do lists.",
+          "sensor_scan_interval": "How often to refresh chores, meal plans, star totals and the task box.",
+          "frame_scan_interval": "How often to refresh brightness, sleep schedule and other device settings.",
+          "photos_scan_interval": "How often to check for a new frame photo."
+        }
+      }
+    }
+  },
   "services": {
     "upload_media": {
       "name": "Upload media",
