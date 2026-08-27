@@ -19,7 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .api import SkylightAPI
-from .const import DOMAIN
+from .const import CHORE_COMPLETE_STATUSES, DOMAIN
 from .coordinator import SkylightListsCoordinator, SkylightSensorCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -96,9 +96,29 @@ def _profile_categories(data: dict) -> list[tuple[str, str]]:
     return out
 
 
-def _wire_status(status: TodoItemStatus | None) -> str:
-    """HA todo status → the ``pending``/``completed`` both chores and list items use."""
+def _list_item_status(status: TodoItemStatus | None) -> str:
+    """HA todo status → the ``pending``/``completed`` a *list item* uses.
+
+    Deliberately not shared with chores: a chore's finished state is the literal
+    ``complete``, and it's set through a separate endpoint rather than as a
+    field. Merging the two is what made ticking a chore silently do nothing.
+    """
     return "completed" if status == TodoItemStatus.COMPLETED else "pending"
+
+
+def _chore_is_complete(attrs: dict) -> bool:
+    """Whether a chore counts as done.
+
+    Checks the completion timestamps as well as ``status`` on purpose. A filled
+    ``completed_on`` / ``completed_at`` is unambiguous, and it covers the case
+    where the chore *list* feed represents completion differently from the
+    completions response — recurring chores expand into per-occurrence records
+    (note the ``group``/``series`` fields), so an occurrence may well carry the
+    date without the parent's status changing.
+    """
+    if str(attrs.get("status") or "") in CHORE_COMPLETE_STATUSES:
+        return True
+    return bool(attrs.get("completed_on") or attrs.get("completed_at"))
 
 
 def _chore_start(due: date | datetime | None) -> str:
@@ -169,7 +189,7 @@ class SkylightTodoList(CoordinatorEntity[SkylightListsCoordinator], TodoListEnti
         if item.summary is not None:
             attrs["name"] = item.summary
         if item.status is not None:
-            attrs["status"] = _wire_status(item.status)
+            attrs["status"] = _list_item_status(item.status)
         if attrs and item.uid:
             await self._api.update_list_item(
                 self._frame_id, self.list_id, item.uid, attrs
@@ -245,7 +265,7 @@ class SkylightMemberChoreTodo(
             summary = attrs.get("summary") or attrs.get("name") or "Chore"
             status = (
                 TodoItemStatus.COMPLETED
-                if attrs.get("status") == "completed"
+                if _chore_is_complete(attrs)
                 else TodoItemStatus.NEEDS_ACTION
             )
             uid = str(c.get("id"))
@@ -284,21 +304,41 @@ class SkylightMemberChoreTodo(
         )
         await self.coordinator.async_request_refresh()
 
+    def _is_complete(self, uid: str) -> bool:
+        for c in self._member_chores():
+            if str(c.get("id")) == str(uid):
+                return _chore_is_complete(c.get("attributes", {}) or {})
+        return False
+
     async def async_update_todo_item(self, item: TodoItem) -> None:
         if not item.uid:
             return
+
         attributes: dict = {}
         if item.summary is not None:
             attributes["summary"] = item.summary
-        if item.status is not None:
-            attributes["status"] = _wire_status(item.status)
         if item.due is not None:
             attributes["start"] = _chore_start(item.due)
         if item.description is not None:
             attributes["description"] = item.description
-        if not attributes:
-            return
-        await self._api.update_chore(self._frame_id, item.uid, attributes)
+        if attributes:
+            await self._api.update_chore(self._frame_id, item.uid, attributes)
+
+        # Completion lives on its own sub-resource, so only touch it when the
+        # tick actually changed: HA re-sends the whole item on any edit, and
+        # clearing an already-incomplete chore isn't necessarily a no-op.
+        if item.status is not None:
+            want_complete = item.status == TodoItemStatus.COMPLETED
+            if want_complete != self._is_complete(item.uid):
+                if want_complete:
+                    # The frame files completions by calendar day, so use HA's
+                    # local date rather than UTC.
+                    await self._api.complete_chore(
+                        self._frame_id, item.uid, dt_util.now().date().isoformat()
+                    )
+                else:
+                    await self._api.uncomplete_chore(self._frame_id, item.uid)
+
         await self.coordinator.async_request_refresh()
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:

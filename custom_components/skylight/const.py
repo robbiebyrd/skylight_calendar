@@ -40,6 +40,15 @@ PLATFORM_NUMBER = "number"
 PLATFORM_TIME = "time"
 PLATFORM_BINARY_SENSOR = "binary_sensor"
 
+# Chore status literals.
+#
+# Skylight spells a finished chore "complete". Note that list_items use
+# "completed" — the two resources genuinely differ, so don't unify them.
+CHORE_STATUS_COMPLETE = "complete"
+# Statuses that count as done when *reading* the feed. Both spellings are
+# accepted so an API-version change can't silently un-tick every chore in HA.
+CHORE_COMPLETE_STATUSES = frozenset({"complete", "completed"})
+
 # Meal category names (well-known IDs from Skylight production).
 # Used to break out per-slot meal sensors even when no meal is planned.
 MEAL_CATEGORY_NAMES = {

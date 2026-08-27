@@ -10,7 +10,14 @@ from typing import Any
 import aiohttp
 from yarl import URL
 
-from .const import API_VERSION, BASE_URL, CLIENT_ID, OAUTH_URL, USER_AGENT
+from .const import (
+    API_VERSION,
+    BASE_URL,
+    CHORE_STATUS_COMPLETE,
+    CLIENT_ID,
+    OAUTH_URL,
+    USER_AGENT,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,13 +136,6 @@ class SkylightAPIError(Exception):
     """Raised on non-401 HTTP failures."""
 
 
-class _Unset:
-    """Sentinel distinguishing "field omitted" from "field explicitly cleared"."""
-
-
-UNSET = _Unset()
-
-
 def _compact(**fields: Any) -> dict:
     """Drop ``None`` fields — used where the API rejects explicit nulls."""
     return {k: v for k, v in fields.items() if v is not None}
@@ -172,10 +172,9 @@ class SkylightAPI:
         self._refresh_token = refresh_token
         self._device_fingerprint = device_fingerprint or ""
         self._token_update_cb = token_update_cb
-        # GET url -> (etag, raw body). Mirrors the web app, which sends
-        # If-None-Match on every read; most coordinator polls come back 304 with
-        # no body. The raw text is cached rather than the parsed object so a
-        # caller can never mutate another poll's data.
+        # GET url -> (etag, raw body), for the handful of getters marked
+        # cacheable=True. The raw text is stored rather than the parsed object so
+        # a caller can never mutate another poll's data.
         self._etags: dict[str, tuple[str, str]] = {}
 
     @property
@@ -193,6 +192,7 @@ class SkylightAPI:
         *,
         params: Mapping[str, Any] | None = None,
         json_body: Any | None = None,
+        cacheable: bool = False,
         _retry: bool = True,
     ) -> Any:
         url = URL(f"{BASE_URL}{path}")
@@ -209,10 +209,16 @@ class SkylightAPI:
         if params:
             clean_params = {k: v for k, v in params.items() if v is not None}
 
-        # Conditional GETs only: a cached response for a mutating request would
-        # be wrong, and Skylight doesn't ETag them anyway.
+        # Opt-in per endpoint, and only for GETs.
+        #
+        # Caching defaults OFF because a stale 304 is indistinguishable from
+        # "nothing changed": if Skylight's validator doesn't move when the
+        # underlying record does, the change never reaches HA. The web app draws
+        # exactly this line — it sends If-None-Match on frames, categories,
+        # devices, source_calendars, user and avatars, and pointedly does NOT on
+        # chores or rewards. Only mark a getter cacheable with that evidence.
         cache_key: str | None = None
-        if method == "GET":
+        if cacheable and method == "GET":
             cache_key = str(url.with_query(clean_params or {}))
             if cached := self._etags.get(cache_key):
                 headers["If-None-Match"] = cached[0]
@@ -237,7 +243,12 @@ class SkylightAPI:
                 _LOGGER.debug("Skylight 401 on %s — refreshing token", path)
                 await self._refresh_access_token()
                 return await self._request(
-                    method, path, params=params, json_body=json_body, _retry=False
+                    method,
+                    path,
+                    params=params,
+                    json_body=json_body,
+                    cacheable=cacheable,
+                    _retry=False,
                 )
             if resp.status == 401:
                 raise SkylightAuthError("Skylight auth failed after refresh")
@@ -331,7 +342,7 @@ class SkylightAPI:
         ``household_name`` ("Byrd & Malone") — that's what the app displays and
         what a user will recognise in the frame picker.
         """
-        data = await self._request("GET", "/api/frames")
+        data = await self._request("GET", "/api/frames", cacheable=True)
         out = []
         for item in data.get("data", []):
             fid = item.get("id")
@@ -342,7 +353,7 @@ class SkylightAPI:
         return out
 
     async def get_frame(self, frame_id: str) -> dict:
-        return await self._request("GET", f"/api/frames/{frame_id}")
+        return await self._request("GET", f"/api/frames/{frame_id}", cacheable=True)
 
     async def get_devices(self, frame_id: str) -> list[dict]:
         """List devices attached to a frame.
@@ -353,7 +364,9 @@ class SkylightAPI:
         `/api/frames/{fid}/devices/{did}`. Returns each device as a dict with
         {id, attributes}.
         """
-        resp = await self._request("GET", f"/api/frames/{frame_id}/devices")
+        resp = await self._request(
+            "GET", f"/api/frames/{frame_id}/devices", cacheable=True
+        )
         return [
             {"id": str(d.get("id")), "attributes": d.get("attributes", {}) or {}}
             for d in resp.get("data", [])
@@ -448,13 +461,16 @@ class SkylightAPI:
         )
 
     async def get_source_calendars(self, frame_id: str) -> dict:
-        return await self._request("GET", f"/api/frames/{frame_id}/source_calendars")
+        return await self._request(
+            "GET", f"/api/frames/{frame_id}/source_calendars", cacheable=True
+        )
 
     async def get_categories(self, frame_id: str, include_profiles: bool = True) -> dict:
         return await self._request(
             "GET",
             f"/api/frames/{frame_id}/categories",
             params={"include_profiles": "true" if include_profiles else None},
+            cacheable=True,
         )
 
     async def get_lists(self, frame_id: str) -> dict:
@@ -585,37 +601,58 @@ class SkylightAPI:
         frame_id: str,
         chore_id: str,
         attributes: dict,
-        *,
-        category_id: str | None | _Unset = UNSET,
     ) -> dict:
-        """Partial update of a chore (JSON:API PUT).
+        """Partial edit of a chore's own fields (``summary``, ``start``, …).
 
-        Only the keys present in ``attributes`` change. Pass ``category_id=None``
-        to unassign the chore; omit it to leave the assignment untouched.
+        Cannot change completion — that's a separate sub-resource, see
+        :meth:`complete_chore`.
 
-        UNVERIFIED envelope. This is the pre-existing shape that
-        :meth:`update_chore_status` has always used, kept as-is rather than
-        churned on a guess — but :meth:`create_chores` turned out to need a flat
-        body on a different route, so this one likely does too. Needs a capture
-        of the web app toggling a chore complete to settle it.
+        INFERRED body: flat, matching the confirmed shapes of both
+        :meth:`create_chores` and :meth:`complete_chore`. The route itself hasn't
+        been captured; a 4xx here echoes the payload so it can be corrected.
         """
-        if not isinstance(category_id, _Unset):
-            attributes = {**attributes, "category_id": category_id}
         return await self._request(
             "PUT",
             f"/api/frames/{frame_id}/chores/{chore_id}",
-            json_body=_jsonapi_doc("chore", attributes),
+            json_body=dict(attributes),
         )
 
-    async def update_chore_status(
-        self, frame_id: str, chore_id: str, status: str
+    async def complete_chore(
+        self, frame_id: str, chore_id: str, completed_on: str
     ) -> dict:
-        """Move a chore between ``pending`` and ``completed``."""
-        return await self.update_chore(frame_id, chore_id, {"status": status})
+        """Tick a chore off, crediting its reward points.
 
-    async def complete_chore(self, frame_id: str, chore_id: str) -> dict:
-        """Mark a chore complete."""
-        return await self.update_chore_status(frame_id, chore_id, "completed")
+        Confirmed against the web app. Three things here are not what you'd
+        guess: it's a dedicated ``completions`` sub-resource rather than a field
+        on the chore, the body is flat, and the status literal is ``complete``
+        rather than ``completed``.
+
+        ``completed_on`` (``YYYY-MM-DD``) is required rather than defaulted
+        because only the caller knows the right local date — deriving it from
+        UTC here would file a late-evening completion under tomorrow.
+
+        The response's ``meta.reward_points`` and ``meta.milestones_achieved``
+        report what the completion earned.
+        """
+        return await self._request(
+            "PUT",
+            f"/api/frames/{frame_id}/chores/{chore_id}/completions",
+            json_body={
+                "status": CHORE_STATUS_COMPLETE,
+                "completed_on": completed_on,
+            },
+        )
+
+    async def uncomplete_chore(self, frame_id: str, chore_id: str) -> dict:
+        """Un-tick a chore.
+
+        INFERRED: the REST inverse of :meth:`complete_chore`'s PUT on the same
+        sub-collection. Un-ticking in the web app hasn't been captured, so this
+        is the shape to check first if clearing a chore fails.
+        """
+        return await self._request(
+            "DELETE", f"/api/frames/{frame_id}/chores/{chore_id}/completions"
+        )
 
     async def delete_chore(self, frame_id: str, chore_id: str) -> None:
         await self._request("DELETE", f"/api/frames/{frame_id}/chores/{chore_id}")
@@ -851,11 +888,11 @@ class SkylightAPI:
 
     async def get_avatars(self) -> dict:
         """Account-wide avatar options (used on family member profiles)."""
-        return await self._request("GET", "/api/avatars")
+        return await self._request("GET", "/api/avatars", cacheable=True)
 
     async def get_colors(self) -> dict:
         """Account-wide colour palette (used on categories and lists)."""
-        return await self._request("GET", "/api/colors")
+        return await self._request("GET", "/api/colors", cacheable=True)
 
     async def get_cloud_upload_credentials(self) -> dict:
         """Fetch short-lived S3 credentials for uploading media."""
