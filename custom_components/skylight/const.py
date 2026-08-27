@@ -37,6 +37,8 @@ PLATFORM_SENSOR = "sensor"
 PLATFORM_IMAGE = "image"
 PLATFORM_SWITCH = "switch"
 PLATFORM_NUMBER = "number"
+PLATFORM_TIME = "time"
+PLATFORM_BINARY_SENSOR = "binary_sensor"
 
 # Meal category names (well-known IDs from Skylight production).
 # Used to break out per-slot meal sensors even when no meal is planned.

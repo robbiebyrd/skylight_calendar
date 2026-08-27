@@ -1,22 +1,77 @@
-"""Switch platform: Skylight frame sleep mode."""
+"""Switch platform: boolean Skylight device settings."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import SkylightAPI
 from .const import DOMAIN
-from .coordinator import SkylightFrameCoordinator
+from .entity import SkylightDeviceEntity
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, kw_only=True)
+class SkylightSwitchDescription(SwitchEntityDescription):
+    """A boolean device attribute. ``key`` is the wire name."""
+
+    unique_suffix: str | None = None
+
+
+SWITCHES: tuple[SkylightSwitchDescription, ...] = (
+    # No entity_category: this one predates the others and is a day-to-day
+    # control rather than configuration. Categorising it now would move it on
+    # every existing user's device page.
+    SkylightSwitchDescription(
+        key="sleep_mode_on",
+        unique_suffix="sleep_mode",
+        name="Sleep mode",
+        icon="mdi:sleep",
+    ),
+    SkylightSwitchDescription(
+        key="nightlight",
+        name="Night light",
+        icon="mdi:weather-night",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    SkylightSwitchDescription(
+        key="show_caption",
+        name="Show captions",
+        icon="mdi:closed-caption-outline",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    SkylightSwitchDescription(
+        key="show_heart",
+        name="Show heart",
+        icon="mdi:heart-outline",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    SkylightSwitchDescription(
+        key="blur_effect",
+        name="Blur effect",
+        icon="mdi:blur",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    SkylightSwitchDescription(
+        key="start_sound",
+        name="Start sound",
+        icon="mdi:volume-high",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    SkylightSwitchDescription(
+        key="side_by_side",
+        name="Side by side",
+        icon="mdi:view-split-vertical",
+        entity_category=EntityCategory.CONFIG,
+    ),
+)
 
 
 async def async_setup_entry(
@@ -26,61 +81,40 @@ async def async_setup_entry(
 ) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        [
-            SkylightSleepModeSwitch(
-                data["frame_coordinator"], data["api"], data["frame_id"], data["frame_name"]
-            )
-        ]
+        SkylightDeviceSwitch(
+            data["frame_coordinator"],
+            data["api"],
+            data["frame_id"],
+            data["frame_name"],
+            description,
+        )
+        for description in SWITCHES
     )
 
 
-class SkylightSleepModeSwitch(
-    CoordinatorEntity[SkylightFrameCoordinator], SwitchEntity
-):
-    _attr_has_entity_name = True
-    _attr_name = "Sleep mode"
-    _attr_icon = "mdi:sleep"
+class SkylightDeviceSwitch(SkylightDeviceEntity, SwitchEntity):
+    entity_description: SkylightSwitchDescription
 
     def __init__(
-        self,
-        coordinator: SkylightFrameCoordinator,
-        api: SkylightAPI,
-        frame_id: str,
-        frame_name: str,
+        self, coordinator, api, frame_id, frame_name, description
     ) -> None:
-        super().__init__(coordinator)
-        self._api = api
-        self._frame_id = frame_id
-        self._attr_unique_id = f"skylight_{frame_id}_sleep_mode"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, frame_id)},
-            name=frame_name,
-            manufacturer="Skylight",
-            model="Calendar Frame",
+        super().__init__(
+            coordinator,
+            api,
+            frame_id,
+            frame_name,
+            description.key,
+            description.unique_suffix,
         )
-
-    @property
-    def _current_device_id(self) -> str | None:
-        data = self.coordinator.data or {}
-        return data.get("device_id") or self.coordinator.device_id
+        self.entity_description = description
 
     @property
     def is_on(self) -> bool | None:
-        attributes = (self.coordinator.data or {}).get("attributes") or {}
-        return bool(attributes.get("sleep_mode_on"))
-
-    async def _async_patch(self, attributes: dict) -> None:
-        device_id = self._current_device_id
-        if not device_id:
-            raise RuntimeError(
-                "Skylight device_id not yet available — first coordinator refresh "
-                "hasn't completed"
-            )
-        await self._api.patch_device(self._frame_id, device_id, attributes)
-        await self.coordinator.async_request_refresh()
+        raw = self._raw_value
+        return None if raw is None else bool(raw)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._async_patch({"sleep_mode_on": True})
+        await self._async_patch(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._async_patch({"sleep_mode_on": False})
+        await self._async_patch(False)

@@ -24,9 +24,13 @@ Full [Skylight Calendar Frame](https://www.ourskylight.com/) integration for Hom
 | `calendar` | one aggregate + one per Skylight source calendar | Rolling ±14 / +60 day window. Standard `calendar.get_events` service works. Create events on the aggregate entity; edit and delete on any writable source calendar. |
 | `todo` | one per Skylight list (Grocery, To-Do, custom lists) + one chore queue per family member | Full create / rename / complete / delete round-trip. Chores created on a member's queue are assigned to them, and the due date sets the chore's day. |
 | `sensor` | see below | Rich `extra_state_attributes` for use in Lovelace + automations. |
-| `switch` | sleep mode | Frame on/off. |
-| `number` | brightness (0–255), slideshow speed (0–240s) | Direct write to the device. |
+| `switch` | sleep mode, night light, show captions, show heart, blur effect, start sound, side by side | Direct write to the device. |
+| `number` | brightness (0–255), slideshow speed (0–240s), night light brightness, sleep sound volume | Direct write to the device. |
+| `time` | sleeps at, wakes at | The frame's sleep schedule. |
+| `binary_sensor` | screen asleep, activated | Read-only. "Screen asleep" is whether the display is *currently* off; the sleep mode switch is whether the schedule is armed. |
 | `image` | current frame photo | |
+
+Entities are only created for settings your frame actually reports — Skylight's device payload varies by hardware, and an absent key means "unsupported here" rather than "off". A handful of settings (`sleep_mode`, `nightlight_color`, `sleep_sound`, `slideshow_style`) are exposed as read-only diagnostic sensors rather than selects, because only one value of each enum has ever been observed and a guessed option list would produce controls that fail.
 
 ### Sensor entities
 
@@ -319,7 +323,7 @@ Every service takes an optional `frame_id`, which is only required when you have
 | `skylight.create_task` | Add an unscheduled item to the Task Box for the frame to assign to a day later. |
 | `skylight.create_list` | Create a new shopping or to-do list. |
 | `skylight.delete_list` | Permanently delete a list and its items. |
-| `skylight.create_reward` | Add a reward redeemable with earned stars, optionally limited to specific family members. |
+| `skylight.create_reward` | Add a reward redeemable with earned stars. Skylight stores one reward per family member, so this creates one per ID given. |
 | `skylight.redeem_reward` | Spend a family member's stars on a reward. |
 | `skylight.create_recipe` | Add a recipe to the meal planner. |
 | `skylight.plan_meal` | Schedule a meal into a slot on a given day. |

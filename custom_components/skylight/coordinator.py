@@ -154,8 +154,38 @@ class SkylightSensorCoordinator(DataUpdateCoordinator):
         )
         self.api = api
         self.frame_id = frame_id
+        self._features: dict | None = None
+
+    async def _async_load_features(self) -> None:
+        """Cache the frame's ``feature_bundle`` on first use.
+
+        Features track the subscription and hardware, neither of which changes
+        while HA is running, so this is fetched once rather than every poll. A
+        plan change is picked up on reload.
+        """
+        if self._features is not None:
+            return
+        try:
+            resp = await self.api.get_frame(self.frame_id)
+            attrs = (resp.get("data") or {}).get("attributes") or {}
+            self._features = attrs.get("feature_bundle") or {}
+        except (SkylightAuthError, SkylightAPIError) as err:
+            _LOGGER.debug("feature_bundle fetch failed: %s", err)
+            self._features = {}
+
+    def _enabled(self, feature: str) -> bool:
+        """Whether a frame app is switched on.
+
+        Fails open: an unrecognised or missing feature is treated as enabled, so
+        a payload change upstream can never silently blank a working sensor.
+        """
+        entry = (self._features or {}).get(feature)
+        if not isinstance(entry, dict):
+            return True
+        return bool(entry.get("enabled", True))
 
     async def _async_update_data(self) -> dict:
+        await self._async_load_features()
         today = dt_util.now().date()
         week_end = (today + timedelta(days=7)).isoformat()
         result: dict = {
@@ -166,34 +196,42 @@ class SkylightSensorCoordinator(DataUpdateCoordinator):
             "categories": None,
             "task_box": None,
         }
-        try:
-            result["chores"] = await self.api.get_chores(
-                self.frame_id, today.isoformat(), week_end
-            )
-        except (SkylightAuthError, SkylightAPIError) as err:
-            _LOGGER.debug("chores fetch failed: %s", err)
-        try:
-            meals = await self.api.get_meals(
-                self.frame_id, today.isoformat(), week_end
-            )
-            result["meals"] = meals
-            # Preserve JSON:API `included` payload for recipe / category label lookup.
-            if isinstance(meals, dict):
-                result["meals_included"] = meals.get("included", []) or []
-        except (SkylightAuthError, SkylightAPIError) as err:
-            _LOGGER.debug("meals fetch failed: %s", err)
-        try:
-            result["reward_points"] = await self.api.get_reward_points(self.frame_id)
-        except (SkylightAuthError, SkylightAPIError) as err:
-            _LOGGER.debug("reward_points fetch failed: %s", err)
+        # Skipping disabled apps saves a request per poll and, more usefully,
+        # stops a permanent 4xx from a feature this household doesn't have from
+        # looking like a transient failure in the logs.
+        if self._enabled("chores"):
+            try:
+                result["chores"] = await self.api.get_chores(
+                    self.frame_id, today.isoformat(), week_end
+                )
+            except (SkylightAuthError, SkylightAPIError) as err:
+                _LOGGER.debug("chores fetch failed: %s", err)
+            try:
+                result["task_box"] = await self.api.get_task_box(self.frame_id)
+            except (SkylightAuthError, SkylightAPIError) as err:
+                _LOGGER.debug("task_box fetch failed: %s", err)
+        if self._enabled("meal_planning"):
+            try:
+                meals = await self.api.get_meals(
+                    self.frame_id, today.isoformat(), week_end
+                )
+                result["meals"] = meals
+                # Preserve JSON:API `included` payload for recipe / category label lookup.
+                if isinstance(meals, dict):
+                    result["meals_included"] = meals.get("included", []) or []
+            except (SkylightAuthError, SkylightAPIError) as err:
+                _LOGGER.debug("meals fetch failed: %s", err)
+        if self._enabled("rewards"):
+            try:
+                result["reward_points"] = await self.api.get_reward_points(self.frame_id)
+            except (SkylightAuthError, SkylightAPIError) as err:
+                _LOGGER.debug("reward_points fetch failed: %s", err)
+        # Categories are not feature-gated: they name the family members every
+        # other platform keys off.
         try:
             result["categories"] = await self.api.get_categories(self.frame_id)
         except (SkylightAuthError, SkylightAPIError) as err:
             _LOGGER.debug("categories fetch failed: %s", err)
-        try:
-            result["task_box"] = await self.api.get_task_box(self.frame_id)
-        except (SkylightAuthError, SkylightAPIError) as err:
-            _LOGGER.debug("task_box fetch failed: %s", err)
         return result
 
 

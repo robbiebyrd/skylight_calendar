@@ -5,16 +5,18 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, MEAL_CATEGORY_NAMES
 from .coordinator import SkylightSensorCoordinator
+from .entity import SkylightDeviceEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +55,84 @@ async def async_setup_entry(
     # Task Box — reusable chore-template pool
     entities.append(SkylightTaskBoxSensor(coord, frame_id, frame_name))
 
+    # Device settings we can read but not safely write (see DEVICE_DIAGNOSTICS).
+    entities.extend(
+        SkylightDeviceDiagnostic(
+            data["frame_coordinator"],
+            data["api"],
+            frame_id,
+            frame_name,
+            description,
+        )
+        for description in DEVICE_DIAGNOSTICS
+    )
+
     async_add_entities(entities)
+
+
+# Read-only on purpose. These are all writable on the device, but each is an
+# enum whose full option set we've only ever seen one value of ("screen_off",
+# "off", 0, null). Publishing a select built from a guessed option list would
+# hand users controls that 4xx; surfacing the current value costs nothing and is
+# honest. Promote any of these to a select once a capture shows the real options.
+DEVICE_DIAGNOSTICS: tuple[SensorEntityDescription, ...] = (
+    SensorEntityDescription(
+        key="sleep_mode",
+        name="Sleep mode behaviour",
+        icon="mdi:power-sleep",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="nightlight_color",
+        name="Night light colour",
+        icon="mdi:palette",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="sleep_sound",
+        name="Sleep sound",
+        icon="mdi:music-note",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="slideshow_style",
+        name="Slideshow style",
+        icon="mdi:image-multiple",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="timezone",
+        name="Frame timezone",
+        icon="mdi:earth",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+)
+
+
+class SkylightDeviceDiagnostic(SkylightDeviceEntity, SensorEntity):
+    """A device setting surfaced read-only."""
+
+    def __init__(
+        self, coordinator, api, frame_id, frame_name, description
+    ) -> None:
+        super().__init__(
+            coordinator,
+            api,
+            frame_id,
+            frame_name,
+            description.key,
+            # Namespaced: "sleep_mode" as a device key would otherwise collide
+            # with the sleep_mode_on switch's unique_id. HA scopes uniqueness by
+            # domain so it would work, but two entities sharing an id string is
+            # a trap for anyone reading the registry later.
+            unique_suffix=f"setting_{description.key}",
+        )
+        self.entity_description = description
+
+    @property
+    def native_value(self) -> str | None:
+        raw = self._raw_value
+        return None if raw is None else str(raw)
 
 
 def _category_label_map(data: dict) -> dict[str, str]:

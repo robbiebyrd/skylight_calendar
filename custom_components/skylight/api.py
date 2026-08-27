@@ -141,33 +141,19 @@ def _compact(**fields: Any) -> dict:
     return {k: v for k, v in fields.items() if v is not None}
 
 
-def _jsonapi_doc(
-    resource_type: str,
-    attributes: Mapping[str, Any],
-    *,
-    relationships: Mapping[str, Any] | None = None,
-) -> dict:
+def _jsonapi_doc(resource_type: str, attributes: Mapping[str, Any]) -> dict:
     """Wrap attributes in a JSON:API request document.
 
-    UNVERIFIED. Every remaining caller of this helper (create/update list,
-    create task_box item, create/update reward, update chore) came from the
-    skylight-mcp reference, which has no fixtures for any of them. Chore
-    *creation* was ported from that same reference and turned out to be plain
-    flat JSON against a different route entirely — so treat this envelope as
-    suspect until a request capture confirms it per-endpoint.
+    UNVERIFIED. Every remaining caller (create/update list, create task_box
+    item, update chore) came from the skylight-mcp reference, which has no
+    fixtures for any of them. Two endpoints ported from that reference — chore
+    create and reward create — both turned out to want flat bodies instead, so
+    treat this envelope as suspect until a capture confirms it per-endpoint.
 
-    Confirmed-flat so far: chore create, calendar events, recipes, meal
-    sittings, list items, device PATCH.
+    Confirmed flat: chore create, calendar events, recipes, meal sittings, list
+    items, device PATCH. Inferred flat: reward create/update.
     """
-    data: dict[str, Any] = {"type": resource_type, "attributes": dict(attributes)}
-    if relationships:
-        data["relationships"] = dict(relationships)
-    return {"data": data}
-
-
-def _to_many(resource_type: str, resource_ids: list[str]) -> dict:
-    """JSON:API to-many relationship."""
-    return {"data": [{"type": resource_type, "id": str(r)} for r in resource_ids]}
+    return {"data": {"type": resource_type, "attributes": dict(attributes)}}
 
 
 class SkylightAPI:
@@ -186,6 +172,11 @@ class SkylightAPI:
         self._refresh_token = refresh_token
         self._device_fingerprint = device_fingerprint or ""
         self._token_update_cb = token_update_cb
+        # GET url -> (etag, raw body). Mirrors the web app, which sends
+        # If-None-Match on every read; most coordinator polls come back 304 with
+        # no body. The raw text is cached rather than the parsed object so a
+        # caller can never mutate another poll's data.
+        self._etags: dict[str, tuple[str, str]] = {}
 
     @property
     def access_token(self) -> str:
@@ -218,6 +209,14 @@ class SkylightAPI:
         if params:
             clean_params = {k: v for k, v in params.items() if v is not None}
 
+        # Conditional GETs only: a cached response for a mutating request would
+        # be wrong, and Skylight doesn't ETag them anyway.
+        cache_key: str | None = None
+        if method == "GET":
+            cache_key = str(url.with_query(clean_params or {}))
+            if cached := self._etags.get(cache_key):
+                headers["If-None-Match"] = cached[0]
+
         async with self._session.request(
             method,
             url,
@@ -226,6 +225,14 @@ class SkylightAPI:
             json=json_body,
             timeout=aiohttp.ClientTimeout(total=20),
         ) as resp:
+            if resp.status == 304 and cache_key is not None:
+                cached = self._etags.get(cache_key)
+                if cached is not None:
+                    return _json.loads(cached[1]) if cached[1] else {}
+                # Server said "unchanged" but we have nothing to show for it;
+                # drop the validator and let the caller retry cleanly.
+                _LOGGER.debug("Skylight 304 on %s with no cached body", path)
+                raise SkylightAPIError(f"GET {path} → 304 without a cached body")
             if resp.status == 401 and _retry:
                 _LOGGER.debug("Skylight 401 on %s — refreshing token", path)
                 await self._refresh_access_token()
@@ -255,6 +262,13 @@ class SkylightAPI:
                     f"{method} {path} → {resp.status}: {text[:200]}{detail}"
                 )
             text = await resp.text()
+            if cache_key is not None and (etag := resp.headers.get("ETag")):
+                # Bound the cache: calendar/chore windows shift daily, so keys
+                # accumulate slowly. Clearing wholesale is fine — worst case is
+                # one uncached poll per endpoint.
+                if len(self._etags) >= 64:
+                    self._etags.clear()
+                self._etags[cache_key] = (etag, text)
             if not text:
                 return {}
             return _json.loads(text)
@@ -677,37 +691,29 @@ class SkylightAPI:
         category_ids: list[str] | None = None,
         respawn_on_redemption: bool = False,
     ) -> dict:
-        """Create a redeemable reward (JSON:API POST).
+        """Create a reward for each of ``category_ids``.
 
-        ``category_ids`` restricts the reward to specific family members; omit it
-        to offer it to the whole household. ``respawn_on_redemption`` keeps the
-        reward available after it's claimed.
+        INFERRED wire shape, not captured. A GET shows every reward carrying a
+        *to-one* ``category`` and the same reward duplicated once per member
+        ("High Five" exists separately for each child) — the same fan-out
+        :meth:`create_chores` does. So this mirrors the one chore-create shape
+        that is confirmed: flat body, no JSON:API envelope, ``category_ids`` as
+        an array. The ported ``categories`` to-many relationship it replaces was
+        wrong on both key and cardinality.
 
-        KNOWN-WRONG, pending a request capture. A GET shows each reward with a
-        *to-one* ``category`` relationship, so this ``categories`` to-many block
-        is wrong on both the key and the cardinality. By analogy with
-        :meth:`create_chores` the real route probably takes a flat body with
-        ``category_ids`` and fans out one reward per member — which is exactly
-        the duplication a GET shows — but that's inference, not observation, and
-        guessing it twice already cost a round trip on chores.
+        If this 422s, the response now echoes the payload we sent — capture the
+        web app creating a reward and correct from that rather than guessing.
         """
-        doc = _jsonapi_doc(
-            "reward",
-            {
-                "name": name,
-                "point_value": point_value,
-                "description": description,
-                "emoji_icon": emoji_icon,
-                "respawn_on_redemption": respawn_on_redemption,
-            },
-            relationships=(
-                {"categories": _to_many("category", category_ids)}
-                if category_ids
-                else None
-            ),
-        )
+        body = {
+            "name": name,
+            "point_value": point_value,
+            "description": description,
+            "emoji_icon": emoji_icon,
+            "respawn_on_redemption": respawn_on_redemption,
+            "category_ids": [str(c) for c in category_ids or []],
+        }
         return await self._request(
-            "POST", f"/api/frames/{frame_id}/rewards", json_body=doc
+            "POST", f"/api/frames/{frame_id}/rewards", json_body=body
         )
 
     async def update_reward(
@@ -718,21 +724,16 @@ class SkylightAPI:
         *,
         category_ids: list[str] | None = None,
     ) -> dict:
-        """Partial update of a reward (JSON:API PATCH).
+        """Partial update of a reward (plain-JSON PATCH).
 
-        Passing ``category_ids`` replaces the whole member set.
+        Only the keys in ``attributes`` change. Flat body for the same reason as
+        :meth:`create_reward` — also inferred rather than captured.
         """
-        doc = _jsonapi_doc(
-            "reward",
-            attributes,
-            relationships=(
-                {"categories": _to_many("category", category_ids)}
-                if category_ids is not None
-                else None
-            ),
-        )
+        body = dict(attributes)
+        if category_ids is not None:
+            body["category_ids"] = [str(c) for c in category_ids]
         return await self._request(
-            "PATCH", f"/api/frames/{frame_id}/rewards/{reward_id}", json_body=doc
+            "PATCH", f"/api/frames/{frame_id}/rewards/{reward_id}", json_body=body
         )
 
     async def delete_reward(self, frame_id: str, reward_id: str) -> None:
