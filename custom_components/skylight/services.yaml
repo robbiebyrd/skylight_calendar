@@ -58,7 +58,9 @@ create_chore:
       name: Family member ID
       description: >-
         Category ID of the family member to assign. Read the available IDs off
-        the frame's category attributes; omit to leave the chore unassigned.
+        the frame's category attributes, or the assignee_id of an existing
+        chore. Skylight rejects a chore with no category.
+      required: true
       example: "9115870"
       selector:
         text: {}

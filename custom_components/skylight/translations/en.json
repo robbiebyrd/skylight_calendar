@@ -65,7 +65,7 @@
         },
         "category_id": {
           "name": "Family member ID",
-          "description": "Category ID of the family member to assign. Read the available IDs off the frame's category attributes; omit to leave the chore unassigned."
+          "description": "Category ID of the family member to assign. Read the available IDs off the frame's category attributes, or the assignee_id of an existing chore. Skylight rejects a chore with no category."
         },
         "reward_points": {
           "name": "Reward points",

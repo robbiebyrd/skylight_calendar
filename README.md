@@ -315,7 +315,7 @@ Every service takes an optional `frame_id`, which is only required when you have
 | Service | What it does |
 |---|---|
 | `skylight.upload_media` | Push a photo or short video to the frame (see above). |
-| `skylight.create_chore` | Add a chore to the chore chart, optionally assigned, timed, recurring, and worth reward points. |
+| `skylight.create_chore` | Add a chore to the chore chart — assigned to a family member (required), optionally timed, recurring, and worth reward points. |
 | `skylight.create_task` | Add an unscheduled item to the Task Box for the frame to assign to a day later. |
 | `skylight.create_list` | Create a new shopping or to-do list. |
 | `skylight.delete_list` | Permanently delete a list and its items. |

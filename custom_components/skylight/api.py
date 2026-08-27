@@ -159,13 +159,6 @@ def _jsonapi_doc(
     return {"data": data}
 
 
-def _to_one(resource_type: str, resource_id: str | None) -> dict:
-    """JSON:API to-one relationship; ``None`` clears the link."""
-    if resource_id is None:
-        return {"data": None}
-    return {"data": {"type": resource_type, "id": str(resource_id)}}
-
-
 def _to_many(resource_type: str, resource_ids: list[str]) -> dict:
     """JSON:API to-many relationship."""
     return {"data": [{"type": resource_type, "id": str(r)} for r in resource_ids]}
@@ -510,7 +503,13 @@ class SkylightAPI:
 
         ``start`` is a ``YYYY-MM-DD`` date, ``start_time`` an optional
         ``HH:MM:SS``. ``category_id`` assigns the chore to a family member (see
-        :meth:`get_categories`); omit it to leave the chore unassigned.
+        :meth:`get_categories`) and is required — Skylight answers a chore with
+        no category with ``422 Category is required``.
+
+        Note the assignment travels as a plain ``category_id`` *attribute*, not
+        as a JSON:API ``relationships`` block: Skylight silently ignores the
+        relationship envelope on this endpoint and then fails the model
+        validation.
         """
         doc = _jsonapi_doc(
             "chore",
@@ -523,10 +522,8 @@ class SkylightAPI:
                 "recurrence_set": recurrence_set,
                 "reward_points": reward_points,
                 "emoji_icon": emoji_icon,
+                **_compact(category_id=category_id),
             },
-            relationships=(
-                {"category": _to_one("category", category_id)} if category_id else None
-            ),
         )
         return await self._request(
             "POST", f"/api/frames/{frame_id}/chores", json_body=doc
@@ -543,15 +540,16 @@ class SkylightAPI:
         """Partial update of a chore (JSON:API PUT).
 
         Only the keys present in ``attributes`` change. Pass ``category_id=None``
-        to unassign the chore; omit it to leave the assignment untouched.
+        to unassign the chore; omit it to leave the assignment untouched. As on
+        :meth:`create_chore`, the assignment is a plain attribute rather than a
+        JSON:API relationship.
         """
-        relationships = None
         if not isinstance(category_id, _Unset):
-            relationships = {"category": _to_one("category", category_id)}
+            attributes = {**attributes, "category_id": category_id}
         return await self._request(
             "PUT",
             f"/api/frames/{frame_id}/chores/{chore_id}",
-            json_body=_jsonapi_doc("chore", attributes, relationships=relationships),
+            json_body=_jsonapi_doc("chore", attributes),
         )
 
     async def update_chore_status(

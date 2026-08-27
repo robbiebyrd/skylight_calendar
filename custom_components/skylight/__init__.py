@@ -167,7 +167,8 @@ CREATE_CHORE_SCHEMA = vol.Schema(
         vol.Required("summary"): _SUMMARY,
         vol.Optional("start"): cv.date,
         vol.Optional("start_time"): cv.string,
-        vol.Optional("category_id"): cv.string,
+        # Skylight 422s a chore with no category, so don't let the call through.
+        vol.Required("category_id"): cv.string,
         vol.Optional("reward_points"): _POINTS,
         vol.Optional("emoji"): cv.string,
         vol.Optional("recurring", default=False): cv.boolean,
