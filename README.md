@@ -21,8 +21,8 @@ Full [Skylight Calendar Frame](https://www.ourskylight.com/) integration for Hom
 
 | HA Platform | Entities | Notes |
 |---|---|---|
-| `calendar` | one per Skylight source calendar | Rolling ±14 / +60 day window. Standard `calendar.get_events` service works. |
-| `todo` | one per Skylight list (Grocery, To-Do, custom lists) | Full create / rename / complete / delete round-trip. |
+| `calendar` | one aggregate + one per Skylight source calendar | Rolling ±14 / +60 day window. Standard `calendar.get_events` service works. Create events on the aggregate entity; edit and delete on any writable source calendar. |
+| `todo` | one per Skylight list (Grocery, To-Do, custom lists) + one chore queue per family member | Full create / rename / complete / delete round-trip. Chores created on a member's queue are assigned to them, and the due date sets the chore's day. |
 | `sensor` | see below | Rich `extra_state_attributes` for use in Lovelace + automations. |
 | `switch` | sleep mode | Frame on/off. |
 | `number` | brightness (0–255), slideshow speed (0–240s) | Direct write to the device. |
@@ -305,6 +305,64 @@ action:
 **Caveat on captions:** Free Skylight accounts have captions server-side-disabled (`plus_gated_content.captions = false`). The caption field is still sent, but the frame ignores it. Skylight Plus subscribers get real caption display.
 
 After a successful upload the `image.<frame>_latest_photo` entity refreshes within a few seconds (the service kicks the photos coordinator immediately instead of waiting for the next 30s poll).
+
+---
+
+## Services
+
+Every service takes an optional `frame_id`, which is only required when you have more than one frame configured. Each one refreshes the relevant coordinator on success, so entities catch up immediately instead of waiting for the next poll.
+
+| Service | What it does |
+|---|---|
+| `skylight.upload_media` | Push a photo or short video to the frame (see above). |
+| `skylight.create_chore` | Add a chore to the chore chart, optionally assigned, timed, recurring, and worth reward points. |
+| `skylight.create_task` | Add an unscheduled item to the Task Box for the frame to assign to a day later. |
+| `skylight.create_list` | Create a new shopping or to-do list. |
+| `skylight.delete_list` | Permanently delete a list and its items. |
+| `skylight.create_reward` | Add a reward redeemable with earned stars, optionally limited to specific family members. |
+| `skylight.redeem_reward` | Spend a family member's stars on a reward. |
+| `skylight.create_recipe` | Add a recipe to the meal planner. |
+| `skylight.plan_meal` | Schedule a meal into a slot on a given day. |
+| `skylight.add_recipe_to_grocery_list` | Push a recipe's ingredients onto the default grocery list. |
+
+**Finding IDs.** The `category_id` for a family member, `meal_category_id` for a meal slot, and `recipe_id` all come off the sensor attributes documented above — for example `sensor.<frame>_chores_today` exposes `assignee_id` per chore, and `sensor.<frame>_meals_today` exposes the recipe and slot for each planned meal. A list's `list_id` is the trailing segment of the matching todo entity's unique ID.
+
+```yaml
+# Assign Saturday's bin duty to a family member, worth 5 stars
+service: skylight.create_chore
+data:
+  summary: Take out the bins
+  start: "2026-09-05"
+  start_time: "17:30:00"
+  category_id: "9115870"
+  reward_points: 5
+  emoji: 🗑️
+```
+
+```yaml
+# Plan Tuesday dinner and send the ingredients to the grocery list
+- service: skylight.plan_meal
+  data:
+    date: "2026-09-01"
+    meal_category_id: "9115872"
+    recipe_id: "1234567"
+- service: skylight.add_recipe_to_grocery_list
+  data:
+    recipe_id: "1234567"
+```
+
+**Creating calendar events** uses the standard HA `calendar.create_event` service against the aggregate `calendar.<frame>_calendar` entity — Skylight puts events with no explicit calendar target on the frame's own calendar. Editing and deleting work against any source calendar Skylight reports as writable; read-only subscriptions (holiday feeds, shared Google calendars) don't advertise those features at all.
+
+```yaml
+service: calendar.create_event
+target:
+  entity_id: calendar.skylight_frame_calendar
+data:
+  summary: Dentist
+  start_date_time: "2026-09-01 14:00:00"
+  end_date_time: "2026-09-01 15:00:00"
+  location: Dr Smith's office
+```
 
 ---
 

@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Mapping
+from datetime import date, datetime
 import logging
+from typing import Any
 
 from dateutil.parser import parse as parse_datetime
 
-from homeassistant.components.calendar import CalendarEntity, CalendarEvent
+from homeassistant.components.calendar import (
+    CalendarEntity,
+    CalendarEntityFeature,
+    CalendarEvent,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from .api import SkylightAPIError
 from .const import DOMAIN
 from .coordinator import SkylightCalendarCoordinator
 
@@ -110,9 +118,45 @@ def _parse_events(
                 summary=attrs.get("summary") or "Skylight Event",
                 description=attrs.get("description") or "",
                 location=attrs.get("location") or "",
+                # uid is what HA hands back on update/delete, so it has to be the
+                # id Skylight addresses the event by.
+                uid=str(ev.get("id")) if ev.get("id") is not None else None,
             )
         )
     return events
+
+
+def _wire_datetime(value: date | datetime) -> str:
+    """Serialise a HA start/end for Skylight (bare date ⇒ all-day event)."""
+    return value.isoformat()
+
+
+def _to_skylight_fields(data: Mapping[str, Any]) -> dict:
+    """Map HA calendar service fields onto Skylight's flat event body.
+
+    HA passes ``dtstart``/``dtend``/``summary``/``description``/``location``/
+    ``rrule``; only the keys actually present are translated, so the same mapper
+    serves both create (all fields) and update (partial patch).
+    """
+    out: dict[str, Any] = {}
+    if "summary" in data:
+        out["summary"] = data["summary"]
+    if "description" in data:
+        out["description"] = data["description"] or ""
+    if "location" in data:
+        out["location"] = data["location"] or ""
+    if (start := data.get("dtstart")) is not None:
+        out["starts_at"] = _wire_datetime(start)
+        out["all_day"] = not isinstance(start, datetime)
+    if (end := data.get("dtend")) is not None:
+        out["ends_at"] = _wire_datetime(end)
+    if rrule := data.get("rrule"):
+        # Skylight stores recurrence as a list of iCal lines while HA hands over a
+        # bare rule body ("FREQ=WEEKLY;BYDAY=SA"), hence the prefix. The exact
+        # shape Skylight wants here is inferred from its type definitions, not
+        # observed against a live frame.
+        out["rrule"] = [rrule if rrule.startswith("RRULE:") else f"RRULE:{rrule}"]
+    return out
 
 
 class _SkylightCalendarBase(
@@ -177,11 +221,92 @@ class _SkylightCalendarBase(
             result.append(ev)
         return result
 
+    # ── Writes ──────────────────────────────────────────────────────────
+
+    def _timezone(self) -> str:
+        return getattr(self.hass.config, "time_zone", None) or "UTC"
+
+    async def async_create_event(self, **kwargs: Any) -> None:
+        fields = _to_skylight_fields(kwargs)
+        starts_at = fields.get("starts_at")
+        ends_at = fields.get("ends_at")
+        if not starts_at or not ends_at:
+            raise HomeAssistantError("A Skylight event needs both a start and an end.")
+        try:
+            await self.coordinator.api.create_calendar_event(
+                self._frame_id,
+                summary=fields.get("summary") or "Event",
+                starts_at=starts_at,
+                ends_at=ends_at,
+                all_day=fields.get("all_day", False),
+                description=fields.get("description"),
+                location=fields.get("location"),
+                rrule=fields.get("rrule"),
+                timezone=self._timezone(),
+            )
+        except SkylightAPIError as err:
+            raise HomeAssistantError(f"Skylight rejected the new event: {err}") from err
+        await self.coordinator.async_request_refresh()
+
+    async def async_update_event(
+        self,
+        uid: str,
+        event: dict[str, Any],
+        recurrence_id: str | None = None,
+        recurrence_range: str | None = None,
+    ) -> None:
+        _reject_recurrence_range(recurrence_range)
+        attributes = _to_skylight_fields(event)
+        if not attributes:
+            return
+        attributes["timezone"] = self._timezone()
+        try:
+            await self.coordinator.api.update_calendar_event(
+                self._frame_id, uid, attributes
+            )
+        except SkylightAPIError as err:
+            raise HomeAssistantError(
+                f"Skylight rejected the event update: {err}"
+            ) from err
+        await self.coordinator.async_request_refresh()
+
+    async def async_delete_event(
+        self,
+        uid: str,
+        recurrence_id: str | None = None,
+        recurrence_range: str | None = None,
+    ) -> None:
+        _reject_recurrence_range(recurrence_range)
+        try:
+            await self.coordinator.api.delete_calendar_event(self._frame_id, uid)
+        except SkylightAPIError as err:
+            raise HomeAssistantError(f"Skylight rejected the delete: {err}") from err
+        await self.coordinator.async_request_refresh()
+
+
+def _reject_recurrence_range(recurrence_range: str | None) -> None:
+    """Skylight addresses one event instance at a time — no series semantics."""
+    if recurrence_range:
+        raise HomeAssistantError(
+            "Skylight can only edit or delete a single event instance, not a "
+            "whole recurrence range."
+        )
+
 
 class SkylightAggregateCalendar(_SkylightCalendarBase):
-    """Merged view of every source calendar (backward-compatible entity)."""
+    """Merged view of every source calendar (backward-compatible entity).
+
+    This is the only entity that accepts new events: Skylight puts an event with
+    no ``calendar_id`` on the frame's own calendar, whereas pinning one to a
+    specific connected source needs account ids we don't read anywhere yet.
+    """
 
     _attr_name = "Calendar"
+    _attr_supported_features = (
+        CalendarEntityFeature.CREATE_EVENT
+        | CalendarEntityFeature.UPDATE_EVENT
+        | CalendarEntityFeature.DELETE_EVENT
+    )
 
     def __init__(self, coordinator, frame_id, frame_name):
         super().__init__(coordinator, frame_id, frame_name)
@@ -197,11 +322,30 @@ class SkylightSourceCalendar(_SkylightCalendarBase):
         self._attr_name = source_name
         self._attr_unique_id = f"skylight_{frame_id}_calendar_source_{source_id}"
 
+    @property
+    def supported_features(self) -> CalendarEntityFeature:
+        """Edit and delete existing events, but only on writable sources.
+
+        Read-only subscriptions (shared Google calendars, holiday feeds) reject
+        writes at the source, so don't offer the affordance at all.
+        """
+        if not self._editable():
+            return CalendarEntityFeature(0)
+        return (
+            CalendarEntityFeature.UPDATE_EVENT | CalendarEntityFeature.DELETE_EVENT
+        )
+
+    def _source_calendar(self) -> dict:
+        for sc in (self.coordinator.data or {}).get("source_calendars", []) or []:
+            if str(sc.get("id")) == self._source_id:
+                return sc
+        return {}
+
+    def _editable(self) -> bool:
+        return bool(self._source_calendar().get("editable"))
+
     def _source_filter(self) -> str | None:
         return self._source_id
 
     def _source_key(self) -> str | None:
-        for sc in (self.coordinator.data or {}).get("source_calendars", []) or []:
-            if str(sc.get("id")) == self._source_id:
-                return sc.get("email")
-        return None
+        return self._source_calendar().get("email")

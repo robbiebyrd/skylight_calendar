@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .api import SkylightAPI
 from .const import DOMAIN
@@ -95,6 +96,25 @@ def _profile_categories(data: dict) -> list[tuple[str, str]]:
     return out
 
 
+def _wire_status(status: TodoItemStatus | None) -> str:
+    """HA todo status → the ``pending``/``completed`` both chores and list items use."""
+    return "completed" if status == TodoItemStatus.COMPLETED else "pending"
+
+
+def _chore_start(due: date | datetime | None) -> str:
+    """Map a HA due date onto a chore's ``start``.
+
+    Skylight chores are day-scoped, so a due *datetime* loses its time component.
+    An item with no due date lands on today, matching what the frame does when a
+    chore is added from its touchscreen.
+    """
+    if isinstance(due, datetime):
+        return due.date().isoformat()
+    if isinstance(due, date):
+        return due.isoformat()
+    return dt_util.now().date().isoformat()
+
+
 class SkylightTodoList(CoordinatorEntity[SkylightListsCoordinator], TodoListEntity):
     _attr_has_entity_name = True
     _attr_supported_features = (
@@ -149,11 +169,7 @@ class SkylightTodoList(CoordinatorEntity[SkylightListsCoordinator], TodoListEnti
         if item.summary is not None:
             attrs["name"] = item.summary
         if item.status is not None:
-            attrs["status"] = (
-                "completed"
-                if item.status == TodoItemStatus.COMPLETED
-                else "pending"
-            )
+            attrs["status"] = _wire_status(item.status)
         if attrs and item.uid:
             await self._api.update_list_item(
                 self._frame_id, self.list_id, item.uid, attrs
@@ -171,13 +187,18 @@ class SkylightMemberChoreTodo(
 ):
     """A single family member's chore queue as a HA Todo entity.
 
-    Read-only for create/delete (Skylight chore CRUD is nontrivial from the app UX),
-    but supports UPDATE so you can mark a chore complete from HA and it round-trips
-    to the frame + rewards ledger.
+    Full CRUD: chores created here are assigned to this member's category, and
+    completing one round-trips to the frame plus the rewards ledger. A chore's
+    due date maps onto its ``start`` day.
     """
 
     _attr_has_entity_name = True
-    _attr_supported_features = TodoListEntityFeature.UPDATE_TODO_ITEM
+    _attr_supported_features = (
+        TodoListEntityFeature.CREATE_TODO_ITEM
+        | TodoListEntityFeature.UPDATE_TODO_ITEM
+        | TodoListEntityFeature.DELETE_TODO_ITEM
+        | TodoListEntityFeature.SET_DUE_DATE_ON_ITEM
+    )
 
     def __init__(
         self,
@@ -244,13 +265,32 @@ class SkylightMemberChoreTodo(
             )
         return result
 
-    async def async_update_todo_item(self, item: TodoItem) -> None:
-        if not item.uid or item.status is None:
-            return
-        status = (
-            "completed"
-            if item.status == TodoItemStatus.COMPLETED
-            else "pending"
+    async def async_create_todo_item(self, item: TodoItem) -> None:
+        await self._api.create_chore(
+            self._frame_id,
+            summary=item.summary or "Chore",
+            start=_chore_start(item.due),
+            status=_wire_status(item.status),
+            category_id=self._category_id,
         )
-        await self._api.update_chore_status(self._frame_id, item.uid, status)
+        await self.coordinator.async_request_refresh()
+
+    async def async_update_todo_item(self, item: TodoItem) -> None:
+        if not item.uid:
+            return
+        attributes: dict = {}
+        if item.summary is not None:
+            attributes["summary"] = item.summary
+        if item.status is not None:
+            attributes["status"] = _wire_status(item.status)
+        if item.due is not None:
+            attributes["start"] = _chore_start(item.due)
+        if not attributes:
+            return
+        await self._api.update_chore(self._frame_id, item.uid, attributes)
+        await self.coordinator.async_request_refresh()
+
+    async def async_delete_todo_items(self, uids: list[str]) -> None:
+        for uid in uids:
+            await self._api.delete_chore(self._frame_id, uid)
         await self.coordinator.async_request_refresh()

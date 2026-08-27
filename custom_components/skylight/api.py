@@ -129,6 +129,48 @@ class SkylightAPIError(Exception):
     """Raised on non-401 HTTP failures."""
 
 
+class _Unset:
+    """Sentinel distinguishing "field omitted" from "field explicitly cleared"."""
+
+
+UNSET = _Unset()
+
+
+def _compact(**fields: Any) -> dict:
+    """Drop ``None`` fields — used where the API rejects explicit nulls."""
+    return {k: v for k, v in fields.items() if v is not None}
+
+
+def _jsonapi_doc(
+    resource_type: str,
+    attributes: Mapping[str, Any],
+    *,
+    relationships: Mapping[str, Any] | None = None,
+) -> dict:
+    """Wrap attributes in a JSON:API request document.
+
+    Chores, lists, rewards and task_box items all take this envelope. Note that
+    calendar events, recipes and meal sittings do *not* — they take plain-JSON
+    bodies, as do the device PATCHes.
+    """
+    data: dict[str, Any] = {"type": resource_type, "attributes": dict(attributes)}
+    if relationships:
+        data["relationships"] = dict(relationships)
+    return {"data": data}
+
+
+def _to_one(resource_type: str, resource_id: str | None) -> dict:
+    """JSON:API to-one relationship; ``None`` clears the link."""
+    if resource_id is None:
+        return {"data": None}
+    return {"data": {"type": resource_type, "id": str(resource_id)}}
+
+
+def _to_many(resource_type: str, resource_ids: list[str]) -> dict:
+    """JSON:API to-many relationship."""
+    return {"data": [{"type": resource_type, "id": str(r)} for r in resource_ids]}
+
+
 class SkylightAPI:
     """Async Skylight API client."""
 
@@ -305,6 +347,69 @@ class SkylightAPI:
             params={"date_min": date_min, "date_max": date_max, "timezone": timezone},
         )
 
+    async def create_calendar_event(
+        self,
+        frame_id: str,
+        summary: str,
+        starts_at: str,
+        ends_at: str,
+        *,
+        all_day: bool = False,
+        description: str | None = None,
+        location: str | None = None,
+        category_ids: list[str] | None = None,
+        calendar_account_id: str | None = None,
+        calendar_id: str | None = None,
+        rrule: list[str] | None = None,
+        timezone: str = "UTC",
+        kind: str = "standard",
+    ) -> dict:
+        """Create a calendar event (plain-JSON body, no JSON:API envelope).
+
+        ``calendar_account_id`` / ``calendar_id`` target a specific connected
+        source calendar; omit both to land the event on the frame's own Skylight
+        calendar. ``category_ids`` assigns the event to family members.
+        """
+        body: dict[str, Any] = {
+            "summary": summary,
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "all_day": all_day,
+            "timezone": timezone,
+            "kind": kind,
+            **_compact(
+                description=description,
+                location=location,
+                category_ids=category_ids,
+                calendar_account_id=calendar_account_id,
+                calendar_id=calendar_id,
+                rrule=rrule,
+            ),
+        }
+        return await self._request(
+            "POST", f"/api/frames/{frame_id}/calendar_events", json_body=body
+        )
+
+    async def update_calendar_event(
+        self, frame_id: str, event_id: str, attributes: dict
+    ) -> dict:
+        """Partial update of a calendar event (plain-JSON PUT body).
+
+        Only the keys present in ``attributes`` change. Use wire names:
+        ``summary``, ``starts_at``, ``ends_at``, ``all_day``, ``description``,
+        ``location``, ``category_ids``, ``rrule``, ``timezone``.
+        """
+        return await self._request(
+            "PUT",
+            f"/api/frames/{frame_id}/calendar_events/{event_id}",
+            json_body=attributes,
+        )
+
+    async def delete_calendar_event(self, frame_id: str, event_id: str) -> None:
+        await self._request(
+            "DELETE", f"/api/frames/{frame_id}/calendar_events/{event_id}"
+        )
+
     async def get_source_calendars(self, frame_id: str) -> dict:
         return await self._request("GET", f"/api/frames/{frame_id}/source_calendars")
 
@@ -317,6 +422,26 @@ class SkylightAPI:
 
     async def get_lists(self, frame_id: str) -> dict:
         return await self._request("GET", f"/api/frames/{frame_id}/lists")
+
+    async def create_list(
+        self, frame_id: str, label: str, kind: str = "to_do", color: str | None = None
+    ) -> dict:
+        """Create a list (JSON:API POST). ``kind`` is ``shopping`` or ``to_do``."""
+        doc = _jsonapi_doc("list", {"label": label, "kind": kind, "color": color})
+        return await self._request(
+            "POST", f"/api/frames/{frame_id}/lists", json_body=doc
+        )
+
+    async def update_list(self, frame_id: str, list_id: str, attributes: dict) -> dict:
+        """Partial update of a list (JSON:API PUT) — ``label``, ``kind``, ``color``."""
+        return await self._request(
+            "PUT",
+            f"/api/frames/{frame_id}/lists/{list_id}",
+            json_body=_jsonapi_doc("list", attributes),
+        )
+
+    async def delete_list(self, frame_id: str, list_id: str) -> None:
+        await self._request("DELETE", f"/api/frames/{frame_id}/lists/{list_id}")
 
     async def get_list_items(self, frame_id: str, list_id: str) -> dict:
         return await self._request(
@@ -346,35 +471,101 @@ class SkylightAPI:
             "DELETE", f"/api/frames/{frame_id}/lists/{list_id}/list_items/{item_id}"
         )
 
-    async def get_chores(self, frame_id: str, after: str, before: str) -> dict:
+    async def get_chores(
+        self,
+        frame_id: str,
+        after: str,
+        before: str,
+        *,
+        filter_linked_to_profile: bool = False,
+    ) -> dict:
+        """Chores in a date range. Set ``filter_linked_to_profile`` to drop chores
+        that aren't assigned to a real family member profile."""
         return await self._request(
             "GET",
             f"/api/frames/{frame_id}/chores",
-            params={"after": after, "before": before, "include_late": "true"},
+            params={
+                "after": after,
+                "before": before,
+                "include_late": "true",
+                "filter": "linked_to_profile" if filter_linked_to_profile else None,
+            },
         )
 
-    async def complete_chore(self, frame_id: str, chore_id: str) -> dict:
-        """Mark a chore complete (JSON:API PUT)."""
-        body = {
-            "data": {
-                "type": "chore",
-                "id": chore_id,
-                "attributes": {"status": "completed"},
-            }
-        }
+    async def create_chore(
+        self,
+        frame_id: str,
+        summary: str,
+        start: str,
+        *,
+        start_time: str | None = None,
+        status: str = "pending",
+        recurring: bool = False,
+        recurrence_set: str | None = None,
+        category_id: str | None = None,
+        reward_points: int | None = None,
+        emoji_icon: str | None = None,
+    ) -> dict:
+        """Create a chore (JSON:API POST).
+
+        ``start`` is a ``YYYY-MM-DD`` date, ``start_time`` an optional
+        ``HH:MM:SS``. ``category_id`` assigns the chore to a family member (see
+        :meth:`get_categories`); omit it to leave the chore unassigned.
+        """
+        doc = _jsonapi_doc(
+            "chore",
+            {
+                "summary": summary,
+                "start": start,
+                "start_time": start_time,
+                "status": status,
+                "recurring": recurring,
+                "recurrence_set": recurrence_set,
+                "reward_points": reward_points,
+                "emoji_icon": emoji_icon,
+            },
+            relationships=(
+                {"category": _to_one("category", category_id)} if category_id else None
+            ),
+        )
         return await self._request(
-            "PUT", f"/api/frames/{frame_id}/chores/{chore_id}", json_body=body
+            "POST", f"/api/frames/{frame_id}/chores", json_body=doc
+        )
+
+    async def update_chore(
+        self,
+        frame_id: str,
+        chore_id: str,
+        attributes: dict,
+        *,
+        category_id: str | None | _Unset = UNSET,
+    ) -> dict:
+        """Partial update of a chore (JSON:API PUT).
+
+        Only the keys present in ``attributes`` change. Pass ``category_id=None``
+        to unassign the chore; omit it to leave the assignment untouched.
+        """
+        relationships = None
+        if not isinstance(category_id, _Unset):
+            relationships = {"category": _to_one("category", category_id)}
+        return await self._request(
+            "PUT",
+            f"/api/frames/{frame_id}/chores/{chore_id}",
+            json_body=_jsonapi_doc("chore", attributes, relationships=relationships),
         )
 
     async def update_chore_status(
         self, frame_id: str, chore_id: str, status: str
     ) -> dict:
-        body = {
-            "data": {"type": "chore", "id": chore_id, "attributes": {"status": status}}
-        }
-        return await self._request(
-            "PUT", f"/api/frames/{frame_id}/chores/{chore_id}", json_body=body
-        )
+        """Move a chore between ``pending`` and ``completed``."""
+        return await self.update_chore(frame_id, chore_id, {"status": status})
+
+    async def complete_chore(self, frame_id: str, chore_id: str) -> dict:
+        """Mark a chore complete."""
+        return await self.update_chore_status(frame_id, chore_id, "completed")
+
+    async def delete_chore(self, frame_id: str, chore_id: str) -> None:
+        await self._request("DELETE", f"/api/frames/{frame_id}/chores/{chore_id}")
 
     async def get_meals(self, frame_id: str, date_min: str, date_max: str) -> dict:
         return await self._request(
@@ -387,11 +578,125 @@ class SkylightAPI:
             },
         )
 
+    async def get_meal_categories(self, frame_id: str) -> dict:
+        """Meal slots for the frame (Breakfast, Lunch, Dinner, Snack)."""
+        return await self._request("GET", f"/api/frames/{frame_id}/meals/categories")
+
+    async def create_meal_sitting(
+        self,
+        frame_id: str,
+        date: str,
+        meal_category_id: str,
+        recipe_id: str | None = None,
+    ) -> dict:
+        """Schedule a meal into a slot on a date (plain-JSON body).
+
+        Omit ``recipe_id`` to block out the slot without picking a recipe.
+        """
+        body = {
+            "date": date,
+            "meal_category_id": meal_category_id,
+            **_compact(meal_recipe_id=recipe_id),
+        }
+        return await self._request(
+            "POST", f"/api/frames/{frame_id}/meals/sittings", json_body=body
+        )
+
     async def get_reward_points(self, frame_id: str) -> dict:
         return await self._request("GET", f"/api/frames/{frame_id}/reward_points")
 
-    async def get_rewards(self, frame_id: str) -> dict:
-        return await self._request("GET", f"/api/frames/{frame_id}/rewards")
+    async def get_rewards(
+        self, frame_id: str, redeemed_at_min: str | None = None
+    ) -> dict:
+        """Redeemable rewards. ``redeemed_at_min`` also includes rewards redeemed
+        on or after that timestamp."""
+        return await self._request(
+            "GET",
+            f"/api/frames/{frame_id}/rewards",
+            params={"redeemed_at_min": redeemed_at_min},
+        )
+
+    async def create_reward(
+        self,
+        frame_id: str,
+        name: str,
+        point_value: int,
+        *,
+        description: str | None = None,
+        emoji_icon: str | None = None,
+        category_ids: list[str] | None = None,
+        respawn_on_redemption: bool = False,
+    ) -> dict:
+        """Create a redeemable reward (JSON:API POST).
+
+        ``category_ids`` restricts the reward to specific family members; omit it
+        to offer it to the whole household. ``respawn_on_redemption`` keeps the
+        reward available after it's claimed.
+        """
+        doc = _jsonapi_doc(
+            "reward",
+            {
+                "name": name,
+                "point_value": point_value,
+                "description": description,
+                "emoji_icon": emoji_icon,
+                "respawn_on_redemption": respawn_on_redemption,
+            },
+            relationships=(
+                {"categories": _to_many("category", category_ids)}
+                if category_ids
+                else None
+            ),
+        )
+        return await self._request(
+            "POST", f"/api/frames/{frame_id}/rewards", json_body=doc
+        )
+
+    async def update_reward(
+        self,
+        frame_id: str,
+        reward_id: str,
+        attributes: dict,
+        *,
+        category_ids: list[str] | None = None,
+    ) -> dict:
+        """Partial update of a reward (JSON:API PATCH).
+
+        Passing ``category_ids`` replaces the whole member set.
+        """
+        doc = _jsonapi_doc(
+            "reward",
+            attributes,
+            relationships=(
+                {"categories": _to_many("category", category_ids)}
+                if category_ids is not None
+                else None
+            ),
+        )
+        return await self._request(
+            "PATCH", f"/api/frames/{frame_id}/rewards/{reward_id}", json_body=doc
+        )
+
+    async def delete_reward(self, frame_id: str, reward_id: str) -> None:
+        await self._request("DELETE", f"/api/frames/{frame_id}/rewards/{reward_id}")
+
+    async def redeem_reward(
+        self, frame_id: str, reward_id: str, category_id: str | None = None
+    ) -> dict:
+        """Spend points on a reward. ``category_id`` is the redeeming member."""
+        return await self._request(
+            "POST",
+            f"/api/frames/{frame_id}/rewards/{reward_id}/redeem",
+            json_body=_compact(category_id=category_id),
+        )
+
+    async def unredeem_reward(self, frame_id: str, reward_id: str) -> dict:
+        """Cancel a redemption and refund the points."""
+        return await self._request(
+            "POST",
+            f"/api/frames/{frame_id}/rewards/{reward_id}/unredeem",
+            json_body={},
+        )
 
     async def get_task_box(self, frame_id: str) -> dict:
         """Reusable chore-template items (the frame's 'Task Box').
@@ -401,10 +706,97 @@ class SkylightAPI:
         """
         return await self._request("GET", f"/api/frames/{frame_id}/task_box/items")
 
+    async def create_task_box_item(
+        self,
+        frame_id: str,
+        summary: str,
+        *,
+        emoji_icon: str | None = None,
+        routine: bool = False,
+        reward_points: int | None = None,
+    ) -> dict:
+        """Add an unscheduled item to the frame's Task Box (JSON:API POST).
+
+        Task box items carry no date — the frame assigns them to a day later.
+        """
+        doc = _jsonapi_doc(
+            "task_box_item",
+            {
+                "summary": summary,
+                "emoji_icon": emoji_icon,
+                "routine": routine,
+                "reward_points": reward_points,
+            },
+        )
+        return await self._request(
+            "POST", f"/api/frames/{frame_id}/task_box/items", json_body=doc
+        )
+
+    async def get_recipes(self, frame_id: str, include: str = "meal_category") -> dict:
+        return await self._request(
+            "GET",
+            f"/api/frames/{frame_id}/meals/recipes",
+            params={"include": include},
+        )
+
     async def get_recipe(self, frame_id: str, recipe_id: str) -> dict:
         return await self._request(
             "GET", f"/api/frames/{frame_id}/meals/recipes/{recipe_id}"
         )
+
+    async def create_recipe(
+        self,
+        frame_id: str,
+        summary: str,
+        *,
+        description: str | None = None,
+        meal_category_id: str | None = None,
+    ) -> dict:
+        """Create a recipe (plain-JSON body, no JSON:API envelope)."""
+        body = {
+            "summary": summary,
+            "description": description,
+            **_compact(meal_category_id=meal_category_id),
+        }
+        return await self._request(
+            "POST", f"/api/frames/{frame_id}/meals/recipes", json_body=body
+        )
+
+    async def update_recipe(
+        self, frame_id: str, recipe_id: str, attributes: dict
+    ) -> dict:
+        """Partial update of a recipe (plain-JSON PATCH) — ``summary``,
+        ``description``, ``meal_category_id``."""
+        return await self._request(
+            "PATCH",
+            f"/api/frames/{frame_id}/meals/recipes/{recipe_id}",
+            json_body=attributes,
+        )
+
+    async def delete_recipe(self, frame_id: str, recipe_id: str) -> None:
+        await self._request(
+            "DELETE", f"/api/frames/{frame_id}/meals/recipes/{recipe_id}"
+        )
+
+    async def add_recipe_to_grocery_list(self, frame_id: str, recipe_id: str) -> dict:
+        """Push a recipe's ingredients onto the frame's default grocery list."""
+        return await self._request(
+            "POST",
+            f"/api/frames/{frame_id}/meals/recipes/{recipe_id}/add_to_grocery_list",
+            json_body={},
+        )
+
+    async def get_albums(self, frame_id: str) -> dict:
+        """Photo albums configured on the frame."""
+        return await self._request("GET", f"/api/frames/{frame_id}/albums")
+
+    async def get_avatars(self) -> dict:
+        """Account-wide avatar options (used on family member profiles)."""
+        return await self._request("GET", "/api/avatars")
+
+    async def get_colors(self) -> dict:
+        """Account-wide colour palette (used on categories and lists)."""
+        return await self._request("GET", "/api/colors")
 
     async def get_cloud_upload_credentials(self) -> dict:
         """Fetch short-lived S3 credentials for uploading media."""

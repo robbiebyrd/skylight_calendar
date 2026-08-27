@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Sign in to Skylight",
-        "description": "1. [Open Skylight sign-in]({auth_url}) in a new tab.\n2. Sign in with your Skylight email and password.\n3. When the page finishes loading, look at your browser's address bar \u2014 it will contain `?code=\u2026`.\n4. Copy the value of `code` (or the whole URL \u2014 either works) and paste it below.",
+        "description": "1. [Open Skylight sign-in]({auth_url}) in a new tab.\n2. Sign in with your Skylight email and password.\n3. When the page finishes loading, look at your browser's address bar — it will contain `?code=…`.\n4. Copy the value of `code` (or the whole URL — either works) and paste it below.",
         "data": {
           "code": "Authorization code"
         }
       },
       "pick_frame": {
         "title": "Choose your Skylight frame",
-        "description": "Your Skylight account has more than one frame. Pick which one to set up now \u2014 you can add the others later.",
+        "description": "Your Skylight account has more than one frame. Pick which one to set up now — you can add the others later.",
         "data": {
           "frame_id": "Frame"
         }
@@ -18,7 +18,7 @@
     },
     "error": {
       "cannot_connect": "Couldn't reach the Skylight API. Try again in a moment.",
-      "invalid_auth": "That code was rejected \u2014 codes expire in about 30 seconds. Click the link again to get a fresh one.",
+      "invalid_auth": "That code was rejected — codes expire in about 30 seconds. Click the link again to get a fresh one.",
       "invalid_code": "That doesn't look like a Skylight authorization code. Paste the value of `code=` from the address bar (or the whole URL).",
       "no_frames": "No Skylight frames were found on this account."
     },
@@ -44,6 +44,220 @@
         "frame_id": {
           "name": "Frame ID",
           "description": "Only required with multiple frames configured."
+        }
+      }
+    },
+    "create_chore": {
+      "name": "Create chore",
+      "description": "Add a chore to the frame's chore chart, optionally assigned to a family member and worth reward points.",
+      "fields": {
+        "summary": {
+          "name": "Summary",
+          "description": "What the chore is."
+        },
+        "start": {
+          "name": "Date",
+          "description": "Day the chore is due. Defaults to today."
+        },
+        "start_time": {
+          "name": "Time",
+          "description": "Optional time of day, as HH:MM:SS."
+        },
+        "category_id": {
+          "name": "Family member ID",
+          "description": "Category ID of the family member to assign. Read the available IDs off the frame's category attributes; omit to leave the chore unassigned."
+        },
+        "reward_points": {
+          "name": "Reward points",
+          "description": "Points credited when the chore is completed."
+        },
+        "emoji": {
+          "name": "Emoji",
+          "description": "Emoji shown next to the chore on the frame."
+        },
+        "recurring": {
+          "name": "Recurring",
+          "description": "Whether the chore repeats."
+        },
+        "recurrence_set": {
+          "name": "Recurrence rule",
+          "description": "Skylight recurrence definition, only used when Recurring is on. Copy the value from an existing recurring chore rather than writing one by hand."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
+        }
+      }
+    },
+    "create_task": {
+      "name": "Create task",
+      "description": "Add an unscheduled item to the frame's Task Box. The frame assigns it to a day later.",
+      "fields": {
+        "summary": {
+          "name": "Summary",
+          "description": "What the task is."
+        },
+        "emoji": {
+          "name": "Emoji",
+          "description": "Emoji shown next to the task on the frame."
+        },
+        "reward_points": {
+          "name": "Reward points",
+          "description": "Points credited when the task is completed."
+        },
+        "routine": {
+          "name": "Routine",
+          "description": "Mark the task as part of a routine."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
+        }
+      }
+    },
+    "create_list": {
+      "name": "Create list",
+      "description": "Create a new shopping or to-do list on the frame.",
+      "fields": {
+        "label": {
+          "name": "Name",
+          "description": "Name of the list."
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "Whether this is a shopping list or a to-do list."
+        },
+        "color": {
+          "name": "Colour",
+          "description": "Colour name used on the frame."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
+        }
+      }
+    },
+    "delete_list": {
+      "name": "Delete list",
+      "description": "Permanently delete a list and its items from the frame. The list ID is the trailing segment of the matching todo entity's unique ID.",
+      "fields": {
+        "list_id": {
+          "name": "List ID",
+          "description": "ID of the list to delete."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
+        }
+      }
+    },
+    "create_reward": {
+      "name": "Create reward",
+      "description": "Add a reward that family members can redeem with earned points.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Name of the reward."
+        },
+        "point_value": {
+          "name": "Point cost",
+          "description": "Points needed to redeem the reward."
+        },
+        "description": {
+          "name": "Description",
+          "description": "Longer explanation shown on the frame."
+        },
+        "emoji": {
+          "name": "Emoji",
+          "description": "Emoji shown next to the reward."
+        },
+        "category_ids": {
+          "name": "Family member IDs",
+          "description": "Restrict the reward to these category IDs. Omit to offer it to everyone."
+        },
+        "respawn_on_redemption": {
+          "name": "Stays available",
+          "description": "Keep the reward on the board after it's claimed."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
+        }
+      }
+    },
+    "redeem_reward": {
+      "name": "Redeem reward",
+      "description": "Spend a family member's points on a reward.",
+      "fields": {
+        "reward_id": {
+          "name": "Reward ID",
+          "description": "ID of the reward to redeem."
+        },
+        "category_id": {
+          "name": "Family member ID",
+          "description": "Category ID of the member spending the points."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
+        }
+      }
+    },
+    "create_recipe": {
+      "name": "Create recipe",
+      "description": "Add a recipe to the frame's meal planner.",
+      "fields": {
+        "summary": {
+          "name": "Name",
+          "description": "Name of the recipe."
+        },
+        "description": {
+          "name": "Description",
+          "description": "Ingredients and notes."
+        },
+        "meal_category_id": {
+          "name": "Meal slot ID",
+          "description": "Meal category ID (breakfast, lunch, dinner, snack) this recipe belongs to."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
+        }
+      }
+    },
+    "plan_meal": {
+      "name": "Plan meal",
+      "description": "Schedule a meal into a slot on a given day.",
+      "fields": {
+        "date": {
+          "name": "Date",
+          "description": "Day to schedule the meal on."
+        },
+        "meal_category_id": {
+          "name": "Meal slot ID",
+          "description": "Meal category ID for the slot to fill."
+        },
+        "recipe_id": {
+          "name": "Recipe ID",
+          "description": "Recipe to schedule. Omit to block the slot out without picking a recipe."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
+        }
+      }
+    },
+    "add_recipe_to_grocery_list": {
+      "name": "Add recipe to grocery list",
+      "description": "Push a recipe's ingredients onto the frame's default grocery list.",
+      "fields": {
+        "recipe_id": {
+          "name": "Recipe ID",
+          "description": "ID of the recipe whose ingredients should be added."
+        },
+        "frame_id": {
+          "name": "Frame ID",
+          "description": "Target frame ID. Only required when multiple Skylight frames are configured. When omitted, the single configured frame is used."
         }
       }
     }

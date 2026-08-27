@@ -20,7 +20,7 @@ upload_media:
       example: Family dinner tonight
       selector:
         text: {}
-    frame_id:
+    frame_id: &frame_id
       name: Frame ID
       description: >-
         Target frame ID. Only required when multiple Skylight frames are
@@ -28,3 +28,274 @@ upload_media:
       example: "5377413"
       selector:
         text: {}
+
+create_chore:
+  name: Create chore
+  description: >-
+    Add a chore to the frame's chore chart, optionally assigned to a family
+    member and worth reward points.
+  fields:
+    summary:
+      name: Summary
+      description: What the chore is.
+      required: true
+      example: Take out the bins
+      selector:
+        text: {}
+    start:
+      name: Date
+      description: Day the chore is due. Defaults to today.
+      example: "2026-09-01"
+      selector:
+        date: {}
+    start_time:
+      name: Time
+      description: Optional time of day, as HH:MM:SS.
+      example: "17:30:00"
+      selector:
+        text: {}
+    category_id:
+      name: Family member ID
+      description: >-
+        Category ID of the family member to assign. Read the available IDs off
+        the frame's category attributes; omit to leave the chore unassigned.
+      example: "9115870"
+      selector:
+        text: {}
+    reward_points:
+      name: Reward points
+      description: Points credited when the chore is completed.
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+    emoji:
+      name: Emoji
+      description: Emoji shown next to the chore on the frame.
+      example: 🗑️
+      selector:
+        text: {}
+    recurring:
+      name: Recurring
+      description: Whether the chore repeats.
+      default: false
+      selector:
+        boolean: {}
+    recurrence_set:
+      name: Recurrence rule
+      description: >-
+        Skylight recurrence definition, only used when Recurring is on. Copy the
+        value from an existing recurring chore rather than writing one by hand.
+      selector:
+        text: {}
+    frame_id: *frame_id
+
+create_task:
+  name: Create task
+  description: >-
+    Add an unscheduled item to the frame's Task Box. The frame assigns it to a
+    day later.
+  fields:
+    summary:
+      name: Summary
+      description: What the task is.
+      required: true
+      example: Clean the garage
+      selector:
+        text: {}
+    emoji:
+      name: Emoji
+      description: Emoji shown next to the task on the frame.
+      example: 🧹
+      selector:
+        text: {}
+    reward_points:
+      name: Reward points
+      description: Points credited when the task is completed.
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+    routine:
+      name: Routine
+      description: Mark the task as part of a routine.
+      default: false
+      selector:
+        boolean: {}
+    frame_id: *frame_id
+
+create_list:
+  name: Create list
+  description: Create a new shopping or to-do list on the frame.
+  fields:
+    label:
+      name: Name
+      description: Name of the list.
+      required: true
+      example: Camping trip
+      selector:
+        text: {}
+    kind:
+      name: Kind
+      description: Whether this is a shopping list or a to-do list.
+      default: to_do
+      selector:
+        select:
+          options:
+            - to_do
+            - shopping
+    color:
+      name: Colour
+      description: Colour name used on the frame.
+      example: blue
+      selector:
+        text: {}
+    frame_id: *frame_id
+
+delete_list:
+  name: Delete list
+  description: >-
+    Permanently delete a list and its items from the frame. The list ID is the
+    trailing segment of the matching todo entity's unique ID.
+  fields:
+    list_id:
+      name: List ID
+      description: ID of the list to delete.
+      required: true
+      example: "1234567"
+      selector:
+        text: {}
+    frame_id: *frame_id
+
+create_reward:
+  name: Create reward
+  description: Add a reward that family members can redeem with earned points.
+  fields:
+    name:
+      name: Name
+      description: Name of the reward.
+      required: true
+      example: Movie night pick
+      selector:
+        text: {}
+    point_value:
+      name: Point cost
+      description: Points needed to redeem the reward.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 10000
+          mode: box
+    description:
+      name: Description
+      description: Longer explanation shown on the frame.
+      selector:
+        text: {}
+    emoji:
+      name: Emoji
+      description: Emoji shown next to the reward.
+      example: 🍿
+      selector:
+        text: {}
+    category_ids:
+      name: Family member IDs
+      description: >-
+        Restrict the reward to these category IDs. Omit to offer it to everyone.
+      selector:
+        object: {}
+    respawn_on_redemption:
+      name: Stays available
+      description: Keep the reward on the board after it's claimed.
+      default: false
+      selector:
+        boolean: {}
+    frame_id: *frame_id
+
+redeem_reward:
+  name: Redeem reward
+  description: Spend a family member's points on a reward.
+  fields:
+    reward_id:
+      name: Reward ID
+      description: ID of the reward to redeem.
+      required: true
+      example: "1234567"
+      selector:
+        text: {}
+    category_id:
+      name: Family member ID
+      description: Category ID of the member spending the points.
+      example: "9115870"
+      selector:
+        text: {}
+    frame_id: *frame_id
+
+create_recipe:
+  name: Create recipe
+  description: Add a recipe to the frame's meal planner.
+  fields:
+    summary:
+      name: Name
+      description: Name of the recipe.
+      required: true
+      example: Spaghetti bolognese
+      selector:
+        text: {}
+    description:
+      name: Description
+      description: Ingredients and notes.
+      selector:
+        text:
+          multiline: true
+    meal_category_id:
+      name: Meal slot ID
+      description: >-
+        Meal category ID (breakfast, lunch, dinner, snack) this recipe belongs
+        to.
+      example: "9115872"
+      selector:
+        text: {}
+    frame_id: *frame_id
+
+plan_meal:
+  name: Plan meal
+  description: Schedule a meal into a slot on a given day.
+  fields:
+    date:
+      name: Date
+      description: Day to schedule the meal on.
+      required: true
+      example: "2026-09-01"
+      selector:
+        date: {}
+    meal_category_id:
+      name: Meal slot ID
+      description: Meal category ID for the slot to fill.
+      required: true
+      example: "9115872"
+      selector:
+        text: {}
+    recipe_id:
+      name: Recipe ID
+      description: >-
+        Recipe to schedule. Omit to block the slot out without picking a recipe.
+      example: "1234567"
+      selector:
+        text: {}
+    frame_id: *frame_id
+
+add_recipe_to_grocery_list:
+  name: Add recipe to grocery list
+  description: Push a recipe's ingredients onto the frame's default grocery list.
+  fields:
+    recipe_id:
+      name: Recipe ID
+      description: ID of the recipe whose ingredients should be added.
+      required: true
+      example: "1234567"
+      selector:
+        text: {}
+    frame_id: *frame_id
