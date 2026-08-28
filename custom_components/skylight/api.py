@@ -619,7 +619,11 @@ class SkylightAPI:
         )
 
     async def complete_chore(
-        self, frame_id: str, chore_id: str, completed_on: str
+        self,
+        frame_id: str,
+        chore_id: str,
+        completed_on: str,
+        instance_date: str | None = None,
     ) -> dict:
         """Tick a chore off, crediting its reward points.
 
@@ -628,9 +632,22 @@ class SkylightAPI:
         on the chore, the body is flat, and the status literal is ``complete``
         rather than ``completed``.
 
-        ``completed_on`` (``YYYY-MM-DD``) is required rather than defaulted
-        because only the caller knows the right local date — deriving it from
-        UTC here would file a late-evening completion under tomorrow.
+        ``chore_id`` is the *series* id — the bare number, never the composite
+        ``<series>-<date>`` id a recurring occurrence is listed under.
+
+        The two dates (``YYYY-MM-DD``) are separate values and routinely differ:
+        ``instance_date`` picks *which occurrence* is being ticked, while
+        ``completed_on`` records *when* it was ticked. Neither is defaulted from
+        the clock here — only the caller knows the right local date, and
+        deriving one from UTC would file a late-evening completion under
+        tomorrow.
+
+        ``instance_date`` is conditional, not merely optional. A chore that has
+        a ``start`` day *must* name its occurrence or the endpoint answers
+        ``422 instance_date can't be blank``. An on-demand chore (``start:
+        null`` — the renewal-interval kind) has no occurrence to name, and must
+        omit the key: the frame then materialises one on the day of completion,
+        and the response comes back under a freshly composite id.
 
         The response's ``meta.reward_points`` and ``meta.milestones_achieved``
         report what the completion earned.
@@ -638,25 +655,34 @@ class SkylightAPI:
         return await self._request(
             "PUT",
             f"/api/frames/{frame_id}/chores/{chore_id}/completions",
-            json_body={
-                "status": CHORE_STATUS_COMPLETE,
-                "completed_on": completed_on,
-            },
+            json_body=_compact(
+                status=CHORE_STATUS_COMPLETE,
+                instance_date=instance_date,
+                completed_on=completed_on,
+            ),
         )
 
-    async def uncomplete_chore(self, frame_id: str, chore_id: str) -> dict:
+    async def uncomplete_chore(
+        self, frame_id: str, chore_id: str, instance_date: str | None = None
+    ) -> dict:
         """Un-tick a chore.
 
-        Confirmed against the web app: the *same* PUT on the same sub-resource as
-        :meth:`complete_chore`, just ``{"status": "pending"}`` with no
-        ``completed_on``. Not a DELETE — the collection name reads like one, but
-        the endpoint sets a state rather than removing a record. The response
-        clears ``completed_on``, ``completed_at`` and ``completed_category``.
+        The *same* PUT on the same sub-resource as :meth:`complete_chore`, just
+        ``pending`` and with no ``completed_on`` — there is nothing to record a
+        date for. Not a DELETE: the collection name reads like one, but the
+        endpoint sets a state rather than removing a record. The response clears
+        ``completed_on``, ``completed_at`` and ``completed_category``.
+
+        ``instance_date`` follows the same conditional rule as completing, and
+        an on-demand chore acquires one *by being completed* — so un-ticking it
+        does pass the date that completing it created.
         """
         return await self._request(
             "PUT",
             f"/api/frames/{frame_id}/chores/{chore_id}/completions",
-            json_body={"status": CHORE_STATUS_PENDING},
+            json_body=_compact(
+                status=CHORE_STATUS_PENDING, instance_date=instance_date
+            ),
         )
 
     async def delete_chore(self, frame_id: str, chore_id: str) -> None:

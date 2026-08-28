@@ -121,6 +121,24 @@ def _chore_is_complete(attrs: dict) -> bool:
     return bool(attrs.get("completed_on") or attrs.get("completed_at"))
 
 
+def _split_chore_uid(uid: str) -> tuple[str, str | None]:
+    """Chore uid → its ``(series_id, occurrence_date)``.
+
+    A recurring chore is listed once per occurrence under a composite id —
+    ``101940933-2026-08-28`` — while one-off chores keep the bare series number.
+    Every chore route is keyed on the series id alone, so the composite form has
+    to be taken apart before it can be put in a URL; the date half is what
+    ``instance_date`` wants.
+    """
+    series, sep, suffix = uid.partition("-")
+    if sep and series.isdigit():
+        try:
+            return series, date.fromisoformat(suffix).isoformat()
+        except ValueError:
+            pass
+    return uid, None
+
+
 def _chore_start(due: date | datetime | None) -> str:
     """Map a HA due date onto a chore's ``start``.
 
@@ -304,15 +322,18 @@ class SkylightMemberChoreTodo(
         )
         await self.coordinator.async_request_refresh()
 
-    def _is_complete(self, uid: str) -> bool:
+    def _chore_attributes(self, uid: str) -> dict:
         for c in self._member_chores():
             if str(c.get("id")) == str(uid):
-                return _chore_is_complete(c.get("attributes", {}) or {})
-        return False
+                return c.get("attributes", {}) or {}
+        return {}
 
     async def async_update_todo_item(self, item: TodoItem) -> None:
         if not item.uid:
             return
+
+        chore_id, occurrence = _split_chore_uid(item.uid)
+        attrs = self._chore_attributes(item.uid)
 
         attributes: dict = {}
         if item.summary is not None:
@@ -322,26 +343,35 @@ class SkylightMemberChoreTodo(
         if item.description is not None:
             attributes["description"] = item.description
         if attributes:
-            await self._api.update_chore(self._frame_id, item.uid, attributes)
+            await self._api.update_chore(self._frame_id, chore_id, attributes)
 
         # Completion lives on its own sub-resource, so only touch it when the
         # tick actually changed: HA re-sends the whole item on any edit, and
         # clearing an already-incomplete chore isn't necessarily a no-op.
         if item.status is not None:
             want_complete = item.status == TodoItemStatus.COMPLETED
-            if want_complete != self._is_complete(item.uid):
+            if want_complete != _chore_is_complete(attrs):
+                # Which occurrence is being ticked: the date in the uid, else
+                # the chore's own ``start`` day. An on-demand chore has neither
+                # and must send no date at all — see :meth:`complete_chore`.
+                instance_date = occurrence or (attrs.get("start") or "")[:10] or None
                 if want_complete:
                     # The frame files completions by calendar day, so use HA's
                     # local date rather than UTC.
                     await self._api.complete_chore(
-                        self._frame_id, item.uid, dt_util.now().date().isoformat()
+                        self._frame_id,
+                        chore_id,
+                        dt_util.now().date().isoformat(),
+                        instance_date,
                     )
                 else:
-                    await self._api.uncomplete_chore(self._frame_id, item.uid)
+                    await self._api.uncomplete_chore(
+                        self._frame_id, chore_id, instance_date
+                    )
 
         await self.coordinator.async_request_refresh()
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:
         for uid in uids:
-            await self._api.delete_chore(self._frame_id, uid)
+            await self._api.delete_chore(self._frame_id, _split_chore_uid(uid)[0])
         await self.coordinator.async_request_refresh()
